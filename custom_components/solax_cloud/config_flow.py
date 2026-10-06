@@ -7,7 +7,7 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     TextSelector,
@@ -41,6 +41,12 @@ TOKEN_FIELD = {
         TextSelectorConfig(type=TextSelectorType.PASSWORD)
     )
 }
+# Reconfigure: leave empty to keep the current token.
+OPTIONAL_TOKEN_FIELD = {
+    vol.Optional(CONF_TOKEN): TextSelector(
+        TextSelectorConfig(type=TextSelectorType.PASSWORD)
+    )
+}
 
 
 class SolaxCloudConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -52,6 +58,9 @@ class SolaxCloudConfigFlow(ConfigFlow, domain=DOMAIN):
         self, api_address: str, token: str, serial: str
     ) -> dict[str, str]:
         """Try the credentials against the API; return form errors."""
+        if not api_address.startswith("https://"):
+            # Plain http would send the token unencrypted.
+            return {"base": "insecure_address"}
         client = SolaxCloudClient(
             async_get_clientsession(self.hass), api_address, token, serial
         )
@@ -117,62 +126,47 @@ class SolaxCloudConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Ask for a token that works with the current API."""
-        entry = self._get_reauth_entry()
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            api_address = normalize_api_address(user_input[CONF_API_ADDRESS])
-            errors = await self._async_validate(
-                api_address, user_input[CONF_TOKEN], entry.data[CONF_SERIAL]
-            )
-            if not errors:
-                return self.async_update_reload_and_abort(
-                    entry,
-                    data_updates={
-                        CONF_API_ADDRESS: api_address,
-                        CONF_TOKEN: user_input[CONF_TOKEN].strip(),
-                    },
-                )
-
-        return self.async_show_form(
-            step_id="reauth_confirm",
-            data_schema=self.add_suggested_values_to_schema(
-                vol.Schema({**API_ADDRESS_FIELD, **TOKEN_FIELD}),
-                {
-                    CONF_API_ADDRESS: entry.data.get(
-                        CONF_API_ADDRESS, DEFAULT_API_ADDRESS
-                    )
-                },
-            ),
-            description_placeholders={"serial": entry.data[CONF_SERIAL]},
-            errors=errors,
+        return await self._async_update_connection(
+            "reauth_confirm", self._get_reauth_entry(), user_input, TOKEN_FIELD
         )
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Change the API address or token of an existing entry."""
-        entry = self._get_reconfigure_entry()
+        return await self._async_update_connection(
+            "reconfigure",
+            self._get_reconfigure_entry(),
+            user_input,
+            OPTIONAL_TOKEN_FIELD,
+        )
+
+    async def _async_update_connection(
+        self,
+        step_id: str,
+        entry: ConfigEntry,
+        user_input: dict[str, Any] | None,
+        token_field: dict[Any, Any],
+    ) -> ConfigFlowResult:
+        """Validate a new API address and token for an entry, then save them."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
             api_address = normalize_api_address(user_input[CONF_API_ADDRESS])
+            token = (user_input.get(CONF_TOKEN) or entry.data[CONF_TOKEN]).strip()
             errors = await self._async_validate(
-                api_address, user_input[CONF_TOKEN], entry.data[CONF_SERIAL]
+                api_address, token, entry.data[CONF_SERIAL]
             )
             if not errors:
                 return self.async_update_reload_and_abort(
                     entry,
-                    data_updates={
-                        CONF_API_ADDRESS: api_address,
-                        CONF_TOKEN: user_input[CONF_TOKEN].strip(),
-                    },
+                    data_updates={CONF_API_ADDRESS: api_address, CONF_TOKEN: token},
                 )
 
         return self.async_show_form(
-            step_id="reconfigure",
+            step_id=step_id,
             data_schema=self.add_suggested_values_to_schema(
-                vol.Schema({**API_ADDRESS_FIELD, **TOKEN_FIELD}),
+                vol.Schema({**API_ADDRESS_FIELD, **token_field}),
                 {
                     CONF_API_ADDRESS: entry.data.get(
                         CONF_API_ADDRESS, DEFAULT_API_ADDRESS

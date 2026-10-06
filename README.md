@@ -8,17 +8,21 @@ for the energy dashboard.
 
 The data comes from the cloud, so it updates as often as your Pocket WiFi/LAN
 dongle uploads (every 5 minutes on known installs). The integration learns
-that rhythm and asks Solax Cloud once per upload, about 30 seconds after it
-is due: new readings show up within a minute, at one API call per upload.
+that rhythm and asks Solax Cloud once per upload, shortly after it is due:
+new readings show up within a minute, at about one API call per upload.
 
-- If an upload is late, it checks every minute; after 20 minutes without an
-  upload it backs off to every 5 minutes.
-- A failed request is retried after a minute.
+- After starting, it polls every 30 seconds for a few uploads to learn the
+  rhythm (anything from 1 to 15 minutes).
+- If an upload is late, it checks every 45 seconds; once the dongle has
+  been quiet for 20 minutes (longer for slow rhythms), every 5 minutes.
+- A failed request is retried within a minute (every 5 minutes if the
+  dongle had already gone quiet).
 - Readings of the moment (power, state of charge, status) become
-  *unavailable* once the latest upload is more than 20 minutes old, so a
-  dongle that stopped sending is not shown as current. Totals, serials and
-  the upload time stay.
-- After 3 hours without an upload, *Settings → Repairs* shows a notice. It
+  *unavailable* when no new upload has arrived for 20 minutes, so a dongle
+  that stopped sending is not shown as current. Totals, serials and the
+  upload time stay. This is measured by Home Assistant's own clock, so a
+  wrong time zone or clock on the Solax side does not matter.
+- After a day without uploads, *Settings → Repairs* shows a notice. It
   disappears by itself once data arrives.
 
 ## Supported devices
@@ -49,7 +53,9 @@ page). You need:
 | Dongle serial number | Registration number of the Pocket WiFi/LAN dongle, **not** the inverter serial (Solax Cloud lists it under *Devices*, type *Dongle*) |
 
 To change the API address or token later, open the integration under
-*Settings → Devices & services* and choose *Reconfigure*.
+*Settings → Devices & services* and choose *Reconfigure* (leave the token
+empty to keep the current one). The API address must start with
+`https://`.
 
 If Solax Cloud refuses the token (for example after you regenerate it, or a
 token from before the v2 API), Home Assistant asks for a new one under

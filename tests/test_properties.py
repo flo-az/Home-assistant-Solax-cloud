@@ -31,7 +31,6 @@ from custom_components.solax_cloud.const import (
     DOMAIN,
 )
 from custom_components.solax_cloud.energy import EMPTY, step
-from custom_components.solax_cloud.polling import is_stale
 
 from .common import (
     API_ADDRESS,
@@ -153,7 +152,8 @@ def results(draw: st.DrawFn) -> dict[str, Any]:
         "uploadTime": draw(
             st.none() | any_datetime.map(lambda d: d.strftime("%Y-%m-%d %H:%M:%S"))
         ),
-        "utcDateTime": draw(timestamps),
+        # Upload times and staleness are covered in test_polling_model.py.
+        "utcDateTime": None,
     }
 
 
@@ -185,8 +185,12 @@ def _unexpected_errors(caplog: pytest.LogCaptureFixture) -> list[str]:
 async def _fresh_entry(
     hass: HomeAssistant, entry: MockConfigEntry, api: AiohttpClientMocker
 ) -> None:
-    """(Re)load the entry with a good response so each example starts clean."""
-    respond(api, json=ok_response())
+    """(Re)load the entry with a good response so each example starts clean.
+
+    The response has no upload time, so whatever an example sends next is
+    taken as new rather than compared with this one.
+    """
+    respond(api, json=ok_response(utcDateTime=None))
     if entry.state is ConfigEntryState.NOT_LOADED:
         await async_setup(hass, entry)
     else:
@@ -197,10 +201,6 @@ async def _fresh_entry(
 
 @SHARED_HASS
 @given(polls=st.lists(poll_outcomes, min_size=1, max_size=5))
-# A "never" sentinel at the end of the date range must not overflow.
-@example(polls=[("ok", {"json": ok_response(utcDateTime="9999-12-31T23:59:59Z")})])
-# ...nor one at the start whose offset puts it before year 1 in UTC.
-@example(polls=[("ok", {"json": ok_response(utcDateTime="0001-01-01T00:00:00+05:00")})])
 async def test_property_sensors_follow_every_poll(
     hass: HomeAssistant,
     config_entry: MockConfigEntry,
@@ -233,14 +233,7 @@ async def test_property_sensors_follow_every_poll(
             continue
 
         result = response["json"]["result"]
-        stale = is_stale(result, dt_util.utcnow())
-        if stale:
-            assert {k: state(hass, k) for k in LIVE_KEYS} == dict.fromkeys(
-                LIVE_KEYS, STATE_UNAVAILABLE
-            )
         for key in NUMERIC_KEYS:
-            if stale and key in LIVE_KEYS:
-                continue
             if result[key] is None:
                 assert state(hass, key) == STATE_UNKNOWN, key
             else:
@@ -249,15 +242,13 @@ async def test_property_sensors_follow_every_poll(
                     result[key], rel=1e-14
                 ), key
         pv_readings = [result[k] for k in PV_KEYS if result[k] is not None]
-        if stale:
-            pass
-        elif pv_readings:
+        if pv_readings:
             assert float(state(hass, "total_solar_power")) == pytest.approx(
                 sum(pv_readings), rel=1e-14
             )
         else:
             assert state(hass, "total_solar_power") == STATE_UNKNOWN
-        for key in STATUS_KEYS if not stale else []:
+        for key in STATUS_KEYS:
             shown = state(hass, key)
             if result[key] in KNOWN_STATUS[key]:
                 assert shown == KNOWN_STATUS[key][result[key]], key
@@ -290,6 +281,10 @@ async def test_property_sensors_follow_every_poll(
 )
 # Longer than the 255 characters a Home Assistant state may hold.
 @example(body={"success": True, "result": {"sn": "S" * 300}})
+# A "never" sentinel at the end of the date range must not overflow...
+@example(body={"success": True, "result": {"utcDateTime": "9999-12-31T23:59:59Z"}})
+# ...nor one at the start whose offset puts it before year 1 in UTC.
+@example(body={"success": True, "result": {"utcDateTime": "0001-01-01T00:00:00+05:00"}})
 async def test_property_any_json_body_is_handled(
     hass: HomeAssistant,
     config_entry: MockConfigEntry,
@@ -316,11 +311,13 @@ async def test_property_any_json_body_is_handled(
         and body.get("success") is True
         and isinstance(body.get("result"), dict)
     )
-    stale = well_formed and is_stale(body["result"], dt_util.utcnow())
     for key in SENSOR_KEYS:
         shown = state(hass, key)
-        if not well_formed or (stale and key in LIVE_KEYS):
+        if not well_formed:
             assert shown == STATE_UNAVAILABLE, key
+        elif key in LIVE_KEYS and shown == STATE_UNAVAILABLE:
+            # A very old upload time makes live readings stale.
+            continue
         elif key in NUMERIC_KEYS or key == "total_solar_power":
             assert shown == STATE_UNKNOWN or math.isfinite(float(shown)), key
         else:

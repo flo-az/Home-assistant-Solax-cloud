@@ -15,8 +15,9 @@ from datetime import datetime, timedelta
 MAX_UPLOAD_GAP = timedelta(minutes=15)
 
 # An upload stamped further ahead of our clock than this is bogus. Taking it
-# as the series' last upload would make every real upload look older.
-MAX_CLOCK_SKEW = timedelta(hours=1)
+# as the series' last upload would make every real upload look older. Wide,
+# because the cloud's clock and ours may differ by hours.
+MAX_CLOCK_SKEW = timedelta(days=1)
 
 
 @dataclass(frozen=True)

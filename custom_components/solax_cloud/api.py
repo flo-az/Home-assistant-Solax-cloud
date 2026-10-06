@@ -85,9 +85,7 @@ class SolaxCloudClient:
                 # HA's parser, as in tests; it rejects NaN/Infinity tokens.
                 body = await response.json(content_type=None, loads=json_loads)
         except (aiohttp.ClientError, TimeoutError, ValueError) as err:
-            raise SolaxCloudConnectionError(
-                f"Error talking to Solax Cloud: {err!r}"
-            ) from err
+            raise SolaxCloudConnectionError(_describe(err)) from err
 
         if not isinstance(body, dict):
             raise SolaxCloudConnectionError(f"Unexpected response: {body!r:.200}")
@@ -102,3 +100,18 @@ class SolaxCloudClient:
         if code in SERIAL_ERROR_CODES:
             raise SolaxCloudSerialError(f"{message} (code {code})")
         raise SolaxCloudApiError(f"{message} (code {code})")
+
+
+def _describe(err: Exception) -> str:
+    """A short description of a request error that never contains the token.
+
+    repr() of aiohttp's errors includes the request headers, among them
+    tokenId; str() of a response error includes only status, message, URL.
+    """
+    if isinstance(err, aiohttp.ClientResponseError):
+        return f"HTTP {err.status} {err.message}".strip()
+    if isinstance(err, TimeoutError):
+        return "timed out"
+    if isinstance(err, ValueError):
+        return "response is not JSON"
+    return type(err).__name__

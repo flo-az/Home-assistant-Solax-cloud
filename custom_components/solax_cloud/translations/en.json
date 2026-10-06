@@ -32,7 +32,7 @@
         },
         "data_description": {
           "api_address": "Shown on the API page next to the token ID.",
-          "token_id": "Shown on the API page of Solax Cloud."
+          "token_id": "Leave empty to keep the current token."
         }
       }
     },
@@ -40,7 +40,8 @@
       "cannot_connect": "Failed to connect to Solax Cloud. Check your network and try again.",
       "invalid_token": "Solax Cloud rejected this token ID. Copy the current one from the API page.",
       "serial_not_in_account": "This dongle serial number is not in the account of this token ID. Use the dongle's registration number, not the inverter serial.",
-      "api_error": "Solax Cloud could not process the request or has no data for this dongle yet. Try again later."
+      "api_error": "Solax Cloud could not process the request or has no data for this dongle yet. Try again later.",
+      "insecure_address": "The API address must start with https://; plain http would send the token unencrypted."
     },
     "abort": {
       "already_configured": "This dongle is already configured.",
@@ -194,8 +195,8 @@
   },
   "issues": {
     "dongle_offline": {
-      "title": "Solax dongle {serial} is not uploading",
-      "description": "Solax Cloud has no data from dongle {serial} since {last_upload}. Its live readings are shown as unavailable until it uploads again. Check that the dongle has power and network; this notice disappears by itself once data arrives."
+      "title": "Solax dongle is not uploading",
+      "description": "Solax Cloud has had no new data from the dongle since {last_upload}. Its live readings are shown as unavailable until it uploads again. Check that the dongle has power and network; this notice disappears by itself once data arrives."
     }
   }
 }

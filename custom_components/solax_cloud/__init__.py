@@ -68,4 +68,6 @@ def _async_clean_up_entities(hass: HomeAssistant, entry: SolaxCloudConfigEntry) 
 
 async def async_unload_entry(hass: HomeAssistant, entry: SolaxCloudConfigEntry) -> bool:
     """Unload Solax config entry."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        entry.runtime_data.async_clear_offline_issue()
+    return unload_ok

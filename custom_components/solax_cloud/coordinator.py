@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -21,20 +22,26 @@ from .api import (
 )
 from .const import CONF_SERIAL, DOMAIN, LOGGER
 from .polling import (
-    DEFAULT_CADENCE,
     OFFLINE_POLL,
     OVERDUE_POLL,
-    STALE_AFTER,
-    cadence,
+    Seen,
+    UploadTracker,
     is_stale,
     next_poll,
+    observe,
     upload_instant,
 )
 
 type SolaxCloudConfigEntry = ConfigEntry[SolaxCloudCoordinator]
 
-# Tell the user once the dongle has not uploaded for this long.
-OFFLINE_ISSUE_AFTER = timedelta(hours=3)
+# Tell the user once no new upload has been seen for this long. Shorter
+# would flag PV-only dongles that lose power every night.
+OFFLINE_ISSUE_AFTER = timedelta(hours=24)
+
+
+def offline_issue_id(entry: ConfigEntry) -> str:
+    """Repair issue id for an entry's dongle not uploading."""
+    return f"dongle_offline_{entry.entry_id}"
 
 
 class SolaxCloudCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -55,27 +62,32 @@ class SolaxCloudCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             config_entry=entry,
             name=DOMAIN,
             update_interval=OVERDUE_POLL,
+            # Write states on every poll even if the data did not change: live
+            # sensors turn unavailable when no new upload arrives, and only
+            # re-evaluate that when their state is written.
+            always_update=True,
         )
         self.client = client
-        self._last_upload: datetime | None = None
-        self._cadence = DEFAULT_CADENCE
+        self.tracker = UploadTracker.start(dt_util.utcnow())
 
     @property
     def stale(self) -> bool:
-        """Whether the current data is from an upload too old to be current."""
-        return is_stale(self.data, dt_util.utcnow())
+        """Whether no new upload has been seen for too long."""
+        return is_stale(self.tracker, dt_util.utcnow())
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from solax API."""
         try:
             data = await self.client.async_get_realtime_data()
         except SolaxCloudTokenError as err:
+            self.async_clear_offline_issue()
             raise ConfigEntryAuthFailed(
                 translation_domain=DOMAIN,
                 translation_key="invalid_token",
                 translation_placeholders={"error": str(err)},
             ) from err
         except SolaxCloudSerialError as err:
+            self.async_clear_offline_issue()
             raise ConfigEntryAuthFailed(
                 translation_domain=DOMAIN,
                 translation_key="serial_not_in_account",
@@ -85,14 +97,14 @@ class SolaxCloudCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 },
             ) from err
         except SolaxCloudConnectionError as err:
-            self.update_interval = self._retry_interval()
+            self._schedule_retry()
             raise UpdateFailed(
                 translation_domain=DOMAIN,
                 translation_key="cannot_connect",
                 translation_placeholders={"error": str(err)},
             ) from err
         except SolaxCloudError as err:
-            self.update_interval = self._retry_interval()
+            self._schedule_retry()
             raise UpdateFailed(
                 translation_domain=DOMAIN,
                 translation_key="api_error",
@@ -100,48 +112,43 @@ class SolaxCloudCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ) from err
 
         now = dt_util.utcnow()
-        upload = upload_instant(data)
-        if upload is not None and (
-            self._last_upload is None or upload > self._last_upload
-        ):
-            if self._last_upload is not None:
-                self._cadence = cadence(self._last_upload, upload)
-            self._last_upload = upload
-        self.update_interval = next_poll(upload, self._cadence, now)
-        self._update_offline_issue(upload, now)
+        self.tracker, seen = observe(self.tracker, upload_instant(data), now)
+        self.update_interval = next_poll(self.tracker, now)
+        self._update_offline_issue(now)
+        if seen is Seen.OLDER and self.data is not None:
+            # A stale cloud replica answered; keep the newer data we have.
+            return self.data
         return data
 
-    def _retry_interval(self) -> timedelta:
+    def _schedule_retry(self) -> None:
         """Retry soon, unless the dongle had already gone quiet."""
-        if (
-            self._last_upload is not None
-            and dt_util.utcnow() - self._last_upload > STALE_AFTER
-        ):
-            return OFFLINE_POLL
-        return OVERDUE_POLL
+        # A failed poll breaks the chain of closely watched uploads.
+        self.tracker = replace(self.tracker, last_poll=None)
+        self.update_interval = OFFLINE_POLL if self.stale else OVERDUE_POLL
 
-    def _update_offline_issue(self, upload: datetime | None, now: datetime) -> None:
-        issue_id = f"dongle_offline_{self.config_entry.entry_id}"
-        if upload is not None and now - upload > OFFLINE_ISSUE_AFTER:
+    def _update_offline_issue(self, now: datetime) -> None:
+        seen_at = self.tracker.seen_at
+        if seen_at is not None and now - seen_at > OFFLINE_ISSUE_AFTER:
             ir.async_create_issue(
                 self.hass,
                 DOMAIN,
-                issue_id,
+                offline_issue_id(self.config_entry),
                 is_fixable=False,
                 severity=ir.IssueSeverity.WARNING,
                 translation_key="dongle_offline",
-                translation_placeholders={
-                    "serial": self.config_entry.data[CONF_SERIAL],
-                    "last_upload": _format_upload(upload),
-                },
+                translation_placeholders={"last_upload": _format_time(seen_at)},
             )
         else:
-            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            self.async_clear_offline_issue()
+
+    def async_clear_offline_issue(self) -> None:
+        """Remove the offline notice (data returned, token problem, unload)."""
+        ir.async_delete_issue(self.hass, DOMAIN, offline_issue_id(self.config_entry))
 
 
-def _format_upload(upload: datetime) -> str:
-    """The upload time in local time, or in UTC where that is out of range."""
+def _format_time(moment: datetime) -> str:
+    """A time in local time, or in UTC where that is out of range."""
     try:
-        return dt_util.as_local(upload).strftime("%Y-%m-%d %H:%M")
+        return dt_util.as_local(moment).strftime("%Y-%m-%d %H:%M")
     except OverflowError:
-        return upload.strftime("%Y-%m-%d %H:%M UTC")
+        return moment.strftime("%Y-%m-%d %H:%M UTC")

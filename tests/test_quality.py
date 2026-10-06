@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import re
+from pathlib import Path
 from typing import Any
 
 import aiohttp
 import pytest
-
+from aiohttp.client_reqrep import RequestInfo
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.icon import async_get_icons
 from homeassistant.helpers.translation import async_get_translations
+from homeassistant.setup import async_setup_component
+from multidict import CIMultiDict, CIMultiDictProxy
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.components.diagnostics import (
     get_diagnostics_for_config_entry,
@@ -23,10 +26,12 @@ from pytest_homeassistant_custom_component.test_util.aiohttp import (
     AiohttpClientMocker,
 )
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
+from yarl import URL
 
 from custom_components.solax_cloud.const import DOMAIN
 
 from .common import (
+    API_URL,
     OPERATION_FAILED,
     SERIAL,
     SERIAL_REJECTED,
@@ -34,6 +39,7 @@ from .common import (
     TOKEN_REJECTED,
     async_setup,
     entity_id,
+    ok_response,
     respond,
 )
 
@@ -185,3 +191,72 @@ def test_german_translation_matches_english() -> None:
     }
     assert {k: v for k, v in placeholders.items() if v[0] != v[1]} == {}
     assert [k for k, v in german.items() if not v.strip()] == []
+
+
+def _http_error_carrying_the_token(status: int) -> aiohttp.ClientResponseError:
+    """An HTTP error as aiohttp raises it: its request info holds our headers."""
+    request_info = RequestInfo(
+        URL(API_URL),
+        "POST",
+        CIMultiDictProxy(CIMultiDict({"tokenId": TOKEN})),
+        URL(API_URL),
+    )
+    return aiohttp.ClientResponseError(
+        request_info, (), status=status, message="Service Unavailable"
+    )
+
+
+@pytest.mark.parametrize("status", [403, 503])
+async def test_regression_http_error_does_not_leak_the_token(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    caplog: pytest.LogCaptureFixture,
+    status: int,
+) -> None:
+    """Regression: an HTTP error put the token into the log and the UI.
+
+    The error text was built with repr() of aiohttp's exception, which
+    includes the request headers, among them tokenId.
+    """
+    respond(aioclient_mock, exc=_http_error_carrying_the_token(status))
+
+    await async_setup(hass, config_entry)
+
+    shown = json.dumps(
+        [config_entry.reason, config_entry.error_reason_translation_placeholders]
+    )
+    assert TOKEN not in caplog.text
+    assert TOKEN not in shown
+    assert str(status) in shown
+
+
+async def test_diagnostics_with_offline_notice_hide_the_serial(
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """The full download, including repair issues, holds no serial or token.
+
+    Home Assistant adds the integration's repair issues to the download; for
+    non-persistent issues like the offline notice it leaves out their
+    placeholders (which contain the serial). This guards that.
+    """
+    respond(aioclient_mock, json=ok_response(utcDateTime="2026-10-03T13:23:04Z"))
+    await async_setup(hass, config_entry)
+    assert ir.async_get(hass).async_get_issue(
+        DOMAIN, f"dongle_offline_{config_entry.entry_id}"
+    )
+
+    assert await async_setup_component(hass, "diagnostics", {})
+    client = await hass_client()
+    response = await client.get(
+        f"/api/diagnostics/config_entry/{config_entry.entry_id}"
+    )
+    payload = await response.text()
+
+    assert response.status == 200
+    assert '"issues"' in payload
+    assert SERIAL not in payload
+    assert TOKEN not in payload

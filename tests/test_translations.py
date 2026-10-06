@@ -105,6 +105,12 @@ async def test_every_flow_error_and_abort_has_text(
         result = await flows.async_configure(first["flow_id"], USER_INPUT)
         reasons.append(f"error.{result['errors']['base']}")
 
+    result = await flows.async_configure(
+        first["flow_id"],
+        {**USER_INPUT, CONF_API_ADDRESS: "http://global.solaxcloud.com"},
+    )
+    reasons.append(f"error.{result['errors']['base']}")
+
     # A second dialog for the same dongle while the first is still open.
     second = await flows.async_init(DOMAIN, context={"source": SOURCE_USER})
     result = await flows.async_configure(second["flow_id"], USER_INPUT)
@@ -132,6 +138,7 @@ async def test_every_flow_error_and_abort_has_text(
         "error.invalid_token",
         "error.serial_not_in_account",
         "error.api_error",
+        "error.insecure_address",
         "abort.already_in_progress",
         "abort.already_configured",
         "abort.reauth_successful",
