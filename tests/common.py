@@ -5,52 +5,55 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
+import aiohttp
 from freezegun.api import FrozenDateTimeFactory
 import pytest
-import requests
 
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
+from pytest_homeassistant_custom_component.test_util.aiohttp import (
+    AiohttpClientMocker,
+)
 
 from custom_components.solax_cloud.const import DOMAIN
 
-API_URL = "https://www.solaxcloud.com/proxyApp/proxy/api/getRealtimeInfo.do"
+API_ADDRESS = "https://global.solaxcloud.com"
+API_PATH = "/api/v2/dataAccess/realtimeInfo/get"
+API_URL = f"{API_ADDRESS}{API_PATH}"
 
 TOKEN = "20240101000000000000000"
 SERIAL = "SWTEST0001"
 UNIQUE_ID = f"SolaxCloud_{SERIAL}"
 
-# A getRealtimeInfo.do result as returned for a live X3-Hybrid-G4 on 2026-10-06
-# (plant time zone UTC+01:00 with DST, so CEST at the time). Serial numbers are
-# replaced; inverterSN, feedinpowerM2, inverterType, inverterStatus and batStatus
-# are not read by the integration and hold placeholder values.
+# A v2 realtime result from a live X3-Hybrid-G4 (plant time zone UTC+01:00,
+# CEST at the time), 2026-10-06. Only the serial numbers are replaced.
 REALTIME_RESULT: dict[str, Any] = {
     "inverterSN": "H3TEST0000001",
     "sn": SERIAL,
-    "acpower": 2224.0,
-    "yieldtoday": 9.2,
-    "yieldtotal": 24211.7,
-    "feedinpower": 1593.0,
-    "feedinenergy": 14398.6,
+    "acpower": 3433.0,
+    "yieldtoday": 12.6,
+    "yieldtotal": 24215.1,
+    "feedinpower": 2860.0,
+    "feedinenergy": 14401.6,
     "consumeenergy": 6818.35,
     "feedinpowerM2": 0.0,
-    "soc": 97.0,
+    "soc": 100.0,
     "peps1": 0.0,
     "peps2": 0.0,
     "peps3": 0.0,
     "inverterType": "14",
     "inverterStatus": "102",
-    "uploadTime": "2026-10-06 14:33:04",
-    "utcDateTime": "2026-10-06T06:33:04Z",
-    "batPower": 3007.0,
-    "powerdc1": 3365.0,
-    "powerdc2": 1866.0,
+    "uploadTime": "2026-10-06 15:23:04",
+    "batPower": -17.0,
+    "powerdc1": 2181.0,
+    "powerdc2": 1235.0,
     "powerdc3": None,
     "powerdc4": None,
     "batStatus": "0",
+    "utcDateTime": "2026-10-06T13:23:04Z",
 }
 
 
@@ -58,41 +61,59 @@ def ok_response(**overrides: Any) -> dict[str, Any]:
     """A successful API response, optionally with some result fields replaced."""
     return {
         "success": True,
-        "exception": "Query success!",
+        "exception": "operation success",
         "result": {**REALTIME_RESULT, **overrides},
         "code": 0,
     }
 
 
-# The API answers HTTP 200 with success=false when it refuses a request
-# (SolaXCloud User API V1.2, 8.2 "Error Code"): an unknown token is 1001.
-REJECTED_RESPONSE: dict[str, Any] = {
+# Refusals as returned by the live API (HTTP 200, success=false).
+TOKEN_REJECTED: dict[str, Any] = {
+    "exception": "token invalid!",
+    "code": 103,
+    "tokenId": TOKEN,
     "success": False,
-    "exception": "Interface Unauthorized",
+}
+SERIAL_REJECTED: dict[str, Any] = {
+    "success": False,
+    "exception": "no auth!",
     "result": None,
-    "code": 1001,
+    "code": 1003,
+}
+# SolaXCloud User API V1.2, 8.2 "Error Code".
+OPERATION_FAILED: dict[str, Any] = {
+    "success": False,
+    "exception": "Operation failed",
+    "result": None,
+    "code": 2001,
 }
 
-# What solaxcloud 0.1.0 surfaces for each transport failure. requests_mock
-# bypasses the library's urllib3 retry adapter, so retried failures are raised
-# here as the exceptions the adapter ends with once its retries are exhausted.
 CONNECTION_FAILURES = [
+    pytest.param({"exc": aiohttp.ClientConnectionError()}, id="network-down"),
+    pytest.param({"exc": TimeoutError()}, id="cloud-too-slow"),
+    pytest.param({"status": 503}, id="http-5xx"),
+    pytest.param({"status": 403}, id="http-4xx"),
     pytest.param(
-        {"exc": requests.exceptions.ConnectionError},
-        id="network-down-or-cloud-too-slow",
-    ),
-    pytest.param({"exc": requests.exceptions.RetryError}, id="cloud-5xx-after-retries"),
-    pytest.param({"status_code": 403}, id="http-4xx"),
-    pytest.param(
-        {"status_code": 200, "text": "<html><body>Maintenance</body></html>"},
+        {"text": "<html><body>Maintenance</body></html>"},
         id="maintenance-page-instead-of-json",
     ),
 ]
-
-FAILED_REQUESTS = [
+SERVICE_FAILURES = [
     *CONNECTION_FAILURES,
-    pytest.param({"json": REJECTED_RESPONSE}, id="request-rejected"),
+    pytest.param({"json": OPERATION_FAILED}, id="operation-failed"),
 ]
+AUTH_FAILURES = [
+    pytest.param({"json": TOKEN_REJECTED}, id="token-rejected"),
+    pytest.param({"json": SERIAL_REJECTED}, id="serial-not-in-account"),
+]
+
+
+def respond(
+    aioclient_mock: AiohttpClientMocker, url: str = API_URL, **response: Any
+) -> None:
+    """Make the API answer every following request with this response."""
+    aioclient_mock.clear_requests()
+    aioclient_mock.post(url, **response)
 
 
 async def async_setup(hass: HomeAssistant, entry: ConfigEntry) -> None:

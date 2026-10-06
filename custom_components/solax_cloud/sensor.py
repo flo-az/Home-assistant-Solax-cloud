@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -11,7 +12,12 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfPower, UnitOfEnergy
+from homeassistant.const import (
+    MAX_LENGTH_STATE_STATE,
+    PERCENTAGE,
+    UnitOfEnergy,
+    UnitOfPower,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -72,36 +78,49 @@ class SolaxCloudSensor(CoordinatorEntity[solaxcloudCoordinator], SensorEntity):
        if self.entity_description.key == "total_solar_power":
            # Calculate total solar production from all MPPT inputs
            data = self.coordinator.data
-           total = 0.0
-           for key in ["powerdc1", "powerdc2", "powerdc3", "powerdc4"]:
-               value = data.get(key)
-               if value is not None:
-                   try:
-                       total += float(value)
-                   except (ValueError, TypeError):
-                       pass
-           return total
+           readings = [r for key in PV_KEYS if (r := _number(data.get(key))) is not None]
+           # No valid input at all is unknown, not 0 W.
+           return _number(sum(readings)) if readings else None
        if self.entity_description.key == "utcDateTime":
-           # Despite the name and the "Z", Solax computes this by reading the
-           # plant's local wall time as China time (UTC+8): a CEST upload at
-           # 14:33:04 arrives as "06:33:04Z". Adding 8 h gives back the wall
-           # time, which is in the plant's (assumed: Home Assistant's) zone.
+           # v2 sends the upload instant in UTC, e.g. "2026-10-06T13:23:04Z".
+           # (v1 sent the plant's wall time read as UTC+8 instead.)
            value = self.coordinator.data.get(self.entity_description.key)
-           if value is None:
+           if not isinstance(value, str):
                return None
-           if isinstance(value, datetime):
-               return value
-           if isinstance(value, str):
-               try:
-                   # ISO 8601 format: "2025-12-28T09:43:55Z"
-                   iso_string = value.replace('Z', '')
-                   wall_time = datetime.fromisoformat(iso_string) + timedelta(hours=8)
-                   return wall_time.replace(tzinfo=dt_util.get_default_time_zone())
-               except (ValueError, TypeError, AttributeError, OverflowError):
-                   return None
-           return None
-       return self.coordinator.data.get(self.entity_description.key)
+           try:
+               parsed = datetime.fromisoformat(value)
+               if parsed.tzinfo is None:
+                   parsed = parsed.replace(tzinfo=dt_util.UTC)
+               return parsed.astimezone(dt_util.UTC)
+           except (ValueError, OverflowError):
+               return None
+       value = self.coordinator.data.get(self.entity_description.key)
+       if self.entity_description.native_unit_of_measurement is not None:
+           return _number(value)
+       return _text(value)
 
+
+# Far beyond any plant; larger values do not survive Home Assistant's
+# 15-digit state formatting intact.
+MAX_READING = 10**15
+
+
+def _number(value: Any) -> int | float | None:
+    """A reading as the API documents it (a plausible number), else None."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    # Also false for NaN and infinities.
+    return value if abs(value) < MAX_READING else None
+
+
+def _text(value: Any) -> str | None:
+    """A text field that fits in a Home Assistant state, else None."""
+    if isinstance(value, str) and len(value) <= MAX_LENGTH_STATE_STATE:
+        return value
+    return None
+
+
+PV_KEYS = ["powerdc1", "powerdc2", "powerdc3", "powerdc4"]
 
 # SolaXCloud User API V1.2, 8.1 "Device Status Mapping".
 INVERTER_STATUS = {

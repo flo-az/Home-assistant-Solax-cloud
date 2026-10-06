@@ -7,7 +7,6 @@
   "config_flow": true,
   "documentation": "https://www.home-assistant.io/integrations/solaxcloud",
   "iot_class": "cloud_polling",
-  "loggers": ["solax_cloud"],
-  "requirements": ["solaxcloud==0.1.0"],
+  "requirements": [],
   "version": "v0.1.2"
 }

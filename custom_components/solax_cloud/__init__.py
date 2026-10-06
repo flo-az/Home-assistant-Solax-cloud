@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
-from solaxcloud.solaxcloud import solaxcloud
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_SERIAL, CONF_TOKEN, DOMAIN
+from .api import SolaxCloudClient
+from .const import (
+    CONF_API_ADDRESS,
+    CONF_SERIAL,
+    CONF_TOKEN,
+    DEFAULT_API_ADDRESS,
+    DOMAIN,
+)
 from .coordinator import solaxcloudCoordinator
 from .sensor import SENSOR_TYPES, sensor_unique_id
 
@@ -19,15 +25,17 @@ PLATFORMS: list[Platform] = [Platform.SENSOR]
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Solax Cloud from a config entry."""
 
-    api = solaxcloud(
-        token=entry.data[CONF_TOKEN],
-        registration_number=entry.data[CONF_SERIAL],
+    client = SolaxCloudClient(
+        async_get_clientsession(hass),
+        entry.data.get(CONF_API_ADDRESS, DEFAULT_API_ADDRESS),
+        entry.data[CONF_TOKEN],
+        entry.data[CONF_SERIAL],
     )
 
-    coordinator = solaxcloudCoordinator(hass, api)
+    coordinator = solaxcloudCoordinator(hass, entry, client)
 
-    # Raises ConfigEntryNotReady on any failed request, so Home Assistant
-    # retries setup instead of giving up.
+    # Raises ConfigEntryNotReady on a failed request, so Home Assistant
+    # retries setup, or ConfigEntryAuthFailed, which asks for a new token.
     await coordinator.async_config_entry_first_refresh()
 
     _async_clean_up_entities(hass, entry)

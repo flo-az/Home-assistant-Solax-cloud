@@ -6,42 +6,47 @@ from typing import Any
 
 from freezegun.api import FrozenDateTimeFactory
 import pytest
-import requests_mock as rm
 
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.test_util.aiohttp import (
+    AiohttpClientMocker,
+)
 
 from .common import (
-    API_URL,
-    FAILED_REQUESTS,
+    AUTH_FAILURES,
+    OPERATION_FAILED,
+    SERVICE_FAILURES,
     async_poll,
     async_setup,
     ok_response,
+    respond,
     state,
 )
 
 
-@pytest.mark.parametrize("response", FAILED_REQUESTS)
+@pytest.mark.parametrize("response", [*SERVICE_FAILURES, *AUTH_FAILURES])
 async def test_regression_failed_poll_marks_sensors_unavailable(
     hass: HomeAssistant,
     config_entry: MockConfigEntry,
-    solax_api: rm.Mocker,
+    solax_api: AiohttpClientMocker,
     freezer: FrozenDateTimeFactory,
     caplog: pytest.LogCaptureFixture,
     response: dict[str, Any],
 ) -> None:
     """Regression: a refused poll froze every sensor on its last value.
 
-    solaxcloud returns None for success=false (token revoked, request refused).
-    The coordinator stored that as fresh data, every sensor raised
+    The v1 client returned None for success=false (token revoked, request
+    refused). The coordinator stored that as fresh data, every sensor raised
     AttributeError on None.get() and kept showing the previous reading as if
     it were current.
     """
     await async_setup(hass, config_entry)
-    assert state(hass, "acpower") == "2224.0"
+    assert state(hass, "acpower") == "3433.0"
 
-    solax_api.get(API_URL, **response)
+    respond(solax_api, **response)
     await async_poll(hass, freezer)
 
     assert state(hass, "acpower") == STATE_UNAVAILABLE
@@ -52,26 +57,28 @@ async def test_regression_failed_poll_marks_sensors_unavailable(
 async def test_sensors_recover_after_failed_poll(
     hass: HomeAssistant,
     config_entry: MockConfigEntry,
-    solax_api: rm.Mocker,
+    solax_api: AiohttpClientMocker,
     freezer: FrozenDateTimeFactory,
 ) -> None:
     """The next good poll brings sensors back with the new readings."""
     await async_setup(hass, config_entry)
-    solax_api.get(API_URL, json={"success": False, "result": None, "code": 2001})
+    respond(solax_api, json=OPERATION_FAILED)
     await async_poll(hass, freezer)
     assert state(hass, "acpower") == STATE_UNAVAILABLE
 
-    solax_api.get(API_URL, json=ok_response(acpower=1000.0))
+    respond(solax_api, json=ok_response(acpower=1000.0))
     await async_poll(hass, freezer)
 
     assert state(hass, "acpower") == "1000.0"
 
 
 async def test_missing_reading_is_unknown(
-    hass: HomeAssistant, config_entry: MockConfigEntry, requests_mock: rm.Mocker
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
 ) -> None:
     """A null field (e.g. no battery) leaves its sensor unknown, not zero."""
-    requests_mock.get(API_URL, json=ok_response(soc=None, batPower=None))
+    respond(aioclient_mock, json=ok_response(soc=None, batPower=None))
 
     await async_setup(hass, config_entry)
 
@@ -79,51 +86,83 @@ async def test_missing_reading_is_unknown(
     assert state(hass, "batPower") == STATE_UNKNOWN
 
 
-@pytest.mark.parametrize(
-    ("time_zone", "upload_time", "utc_date_time", "expected"),
-    [
-        pytest.param(
-            "Europe/Berlin",
-            "2026-10-06 14:33:04",
-            "2026-10-06T06:33:04Z",
-            "2026-10-06T12:33:04+00:00",
-            id="live-sample-cest",
-        ),
-        # The sample from the comment that introduced the +7 h correction,
-        # assuming that plant also ran on UTC+01:00.
-        pytest.param(
-            "Europe/Berlin",
-            "2025-12-28 17:43:55",
-            "2025-12-28T09:43:55Z",
-            "2025-12-28T16:43:55+00:00",
-            id="original-report-cet",
-        ),
-    ],
-)
-async def test_regression_utc_date_time_is_upload_instant(
+async def test_implausible_numbers_are_unknown(
     hass: HomeAssistant,
     config_entry: MockConfigEntry,
-    requests_mock: rm.Mocker,
-    time_zone: str,
-    upload_time: str,
-    utc_date_time: str,
-    expected: str,
+    aioclient_mock: AiohttpClientMocker,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Regression: utcDateTime was shifted by a fixed +7 h.
-
-    Solax derives utcDateTime by reading the plant's local wall time as
-    UTC+8, so it lags the real instant by 8 h minus the plant's UTC offset:
-    7 h in CET winter, 6 h in CEST summer. The fixed +7 h put the summer
-    timestamp one hour in the future.
-    """
-    await hass.config.async_set_time_zone(time_zone)
-    requests_mock.get(
-        API_URL, json=ok_response(uploadTime=upload_time, utcDateTime=utc_date_time)
+    """Readings no plant produces never reach a state."""
+    respond(
+        aioclient_mock,
+        json=ok_response(acpower=1.0e300, soc=-(10**18), powerdc1=1.0e308, powerdc2=1.0e308),
     )
 
     await async_setup(hass, config_entry)
 
-    assert state(hass, "utcDateTime") == expected
+    assert [state(hass, k) for k in ("acpower", "soc", "total_solar_power")] == [
+        STATE_UNKNOWN
+    ] * 3
+    assert "ERROR" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "reading",
+    [True, False, "3433.0", [3433.0], {"value": 3433.0}],
+    ids=["true", "false", "numeric-string", "list", "object"],
+)
+async def test_wrongly_typed_readings_are_unknown(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    caplog: pytest.LogCaptureFixture,
+    reading: Any,
+) -> None:
+    """A reading that is not a JSON number (as documented) is unknown."""
+    respond(aioclient_mock, json=ok_response(acpower=reading))
+
+    await async_setup(hass, config_entry)
+
+    assert state(hass, "acpower") == STATE_UNKNOWN
+    assert "ERROR" not in caplog.text
+
+
+@pytest.mark.parametrize("token", ["NaN", "Infinity", "-Infinity"])
+async def test_non_standard_json_fails_the_poll(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    token: str,
+) -> None:
+    """NaN/Infinity are not JSON; such a body is a failed request."""
+    respond(
+        aioclient_mock,
+        text=f'{{"success": true, "code": 0, "result": {{"acpower": {token}}}}}',
+    )
+
+    await async_setup(hass, config_entry)
+
+    assert config_entry.state is ConfigEntryState.SETUP_RETRY
+
+
+@pytest.mark.parametrize("time_zone", ["Europe/Berlin", "US/Pacific", "UTC"])
+async def test_utc_date_time_is_the_upload_instant(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    solax_api: AiohttpClientMocker,
+    time_zone: str,
+) -> None:
+    """v2 sends utcDateTime in real UTC; no correction may be applied.
+
+    v1 sent the plant's wall time read as UTC+8, which earlier versions
+    corrected by a fixed offset. The live v2 sample was uploaded at
+    15:23:04 CEST, i.e. 13:23:04 UTC, whatever zone Home Assistant runs in.
+    """
+    await hass.config.async_set_time_zone(time_zone)
+
+    await async_setup(hass, config_entry)
+
+    assert state(hass, "utcDateTime") == "2026-10-06T13:23:04+00:00"
 
 
 @pytest.mark.parametrize(
@@ -147,13 +186,13 @@ async def test_regression_utc_date_time_is_upload_instant(
 async def test_status_codes_map_to_states(
     hass: HomeAssistant,
     config_entry: MockConfigEntry,
-    requests_mock: rm.Mocker,
+    aioclient_mock: AiohttpClientMocker,
     key: str,
     code: str | None,
     expected: str,
 ) -> None:
     """Status codes become named states; undocumented codes are unknown."""
-    requests_mock.get(API_URL, json=ok_response(**{key: code}))
+    respond(aioclient_mock, json=ok_response(**{key: code}))
 
     await async_setup(hass, config_entry)
 

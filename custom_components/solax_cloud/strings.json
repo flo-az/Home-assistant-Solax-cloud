@@ -3,24 +3,36 @@
     "step": {
       "user": {
         "title": "Connect to Solax Cloud",
-        "description": "Copy the token ID from the API page in Solax Cloud.",
+        "description": "Copy the API address and token ID from the API page in Solax Cloud (the API button at the top of the page).",
         "data": {
+          "api_address": "API address",
           "token_id": "Token ID",
           "serial_number": "Dongle serial number"
         },
         "data_description": {
-          "token_id": "Shown on the API page of Solax Cloud (Support → Third-party ecology → API).",
+          "api_address": "Shown on the API page next to the token ID.",
+          "token_id": "Shown on the API page of Solax Cloud.",
           "serial_number": "Registration number of the Pocket WiFi/LAN dongle, not the inverter serial."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Solax Cloud token needed",
+        "description": "Solax Cloud refused the token ID for dongle {serial}. Tokens from before the switch to the v2 API may no longer work: copy the current API address and token ID from the API page in Solax Cloud.",
+        "data": {
+          "api_address": "API address",
+          "token_id": "Token ID"
         }
       }
     },
     "error": {
       "cannot_connect": "Failed to connect to Solax Cloud. Check your network and try again.",
-      "invalid_token_or_serial": "Solax Cloud rejected this token ID and serial number."
+      "invalid_token_or_serial": "Solax Cloud rejected this token ID and serial number.",
+      "api_error": "Solax Cloud could not process the request. Try again later."
     },
     "abort": {
       "already_configured": "This dongle is already configured.",
-      "already_in_progress": "This dongle is already being set up."
+      "already_in_progress": "This dongle is already being set up.",
+      "reauth_successful": "The new token works; Solax Cloud is connected again."
     }
   },
   "entity": {

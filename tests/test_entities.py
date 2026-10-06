@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import requests_mock as rm
-
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.test_util.aiohttp import (
+    AiohttpClientMocker,
+)
 
 from custom_components.solax_cloud.const import DOMAIN
 
@@ -50,7 +51,7 @@ def _registered_keys(hass: HomeAssistant, entry: MockConfigEntry) -> set[str]:
 
 
 async def test_registers_one_sensor_per_documented_field(
-    hass: HomeAssistant, config_entry: MockConfigEntry, solax_api: rm.Mocker
+    hass: HomeAssistant, config_entry: MockConfigEntry, solax_api: AiohttpClientMocker
 ) -> None:
     """Only fields the API returns get a sensor; none is unknown by design."""
     await async_setup(hass, config_entry)
@@ -59,7 +60,7 @@ async def test_registers_one_sensor_per_documented_field(
 
 
 async def test_unused_inputs_are_disabled_by_default(
-    hass: HomeAssistant, config_entry: MockConfigEntry, solax_api: rm.Mocker
+    hass: HomeAssistant, config_entry: MockConfigEntry, solax_api: AiohttpClientMocker
 ) -> None:
     """Inputs most inverters lack (MPPT 3/4, a second meter) start disabled."""
     await async_setup(hass, config_entry)
@@ -75,7 +76,7 @@ async def test_unused_inputs_are_disabled_by_default(
 
 
 async def test_regression_inverter_serial_reads_documented_field(
-    hass: HomeAssistant, config_entry: MockConfigEntry, solax_api: rm.Mocker
+    hass: HomeAssistant, config_entry: MockConfigEntry, solax_api: AiohttpClientMocker
 ) -> None:
     """Regression: the inverter serial read "inverterSn" and was always unknown.
 
@@ -98,7 +99,7 @@ async def test_regression_inverter_serial_reads_documented_field(
 
 
 async def test_regression_sensors_for_missing_fields_are_removed(
-    hass: HomeAssistant, config_entry: MockConfigEntry, solax_api: rm.Mocker
+    hass: HomeAssistant, config_entry: MockConfigEntry, solax_api: AiohttpClientMocker
 ) -> None:
     """Regression: 36 sensors read fields this API never returns.
 
