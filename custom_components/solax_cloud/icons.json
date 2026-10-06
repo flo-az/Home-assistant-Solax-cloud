@@ -1,0 +1,94 @@
+{
+  "entity": {
+    "sensor": {
+      "inverter_serial": {
+        "default": "mdi:identifier"
+      },
+      "pocket_serial": {
+        "default": "mdi:identifier"
+      },
+      "inverter_status": {
+        "default": "mdi:solar-power-variant",
+        "state": {
+          "normal": "mdi:check-circle-outline",
+          "standby": "mdi:sleep",
+          "sleep": "mdi:sleep",
+          "recoverable_fault": "mdi:alert-circle-outline",
+          "permanent_fault": "mdi:alert-octagon",
+          "off_grid": "mdi:transmission-tower-off",
+          "firmware_upgrade": "mdi:update"
+        }
+      },
+      "ac_power": {
+        "default": "mdi:sine-wave"
+      },
+      "yield_today": {
+        "default": "mdi:solar-power-variant"
+      },
+      "yield_total": {
+        "default": "mdi:solar-power-variant"
+      },
+      "feedin_power": {
+        "default": "mdi:transmission-tower-export"
+      },
+      "feedin_energy": {
+        "default": "mdi:transmission-tower-export"
+      },
+      "consume_energy": {
+        "default": "mdi:transmission-tower-import"
+      },
+      "meter2_power": {
+        "default": "mdi:meter-electric-outline"
+      },
+      "mppt1_power": {
+        "default": "mdi:solar-panel"
+      },
+      "mppt2_power": {
+        "default": "mdi:solar-panel"
+      },
+      "mppt3_power": {
+        "default": "mdi:solar-panel"
+      },
+      "mppt4_power": {
+        "default": "mdi:solar-panel"
+      },
+      "total_solar_power": {
+        "default": "mdi:solar-power"
+      },
+      "battery_power": {
+        "default": "mdi:battery-charging"
+      },
+      "battery_status": {
+        "default": "mdi:battery-check",
+        "state": {
+          "fault": "mdi:battery-alert",
+          "disconnected": "mdi:battery-off-outline"
+        }
+      },
+      "eps_phase1_power": {
+        "default": "mdi:power-plug-battery"
+      },
+      "eps_phase2_power": {
+        "default": "mdi:power-plug-battery"
+      },
+      "eps_phase3_power": {
+        "default": "mdi:power-plug-battery"
+      },
+      "upload_time": {
+        "default": "mdi:cloud-upload-outline"
+      },
+      "utc_date_time": {
+        "default": "mdi:cloud-upload-outline"
+      },
+      "battery_charge_energy": {
+        "default": "mdi:battery-arrow-up"
+      },
+      "battery_discharge_energy": {
+        "default": "mdi:battery-arrow-down"
+      },
+      "solar_energy": {
+        "default": "mdi:solar-power"
+      }
+    }
+  }
+}

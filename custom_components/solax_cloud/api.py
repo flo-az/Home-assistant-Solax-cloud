@@ -92,8 +92,8 @@ class SolaxCloudClient:
         if not isinstance(body, dict):
             raise SolaxCloudConnectionError(f"Unexpected response: {body!r:.200}")
         if body.get("success") is True:
-            if isinstance(body.get("result"), dict):
-                return body["result"]
+            if isinstance(result := body.get("result"), dict):
+                return result
             raise SolaxCloudApiError("Solax Cloud has no data for this dongle yet")
 
         code, message = body.get("code"), body.get("exception")

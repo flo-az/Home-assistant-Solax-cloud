@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import aiohttp
@@ -10,7 +10,7 @@ from freezegun.api import FrozenDateTimeFactory
 import pytest
 
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
@@ -55,6 +55,10 @@ REALTIME_RESULT: dict[str, Any] = {
     "batStatus": "0",
     "utcDateTime": "2026-10-06T13:23:04Z",
 }
+
+
+# 40 s after the sample's upload (utcDateTime), when its data is current.
+LIVE_SAMPLE_NOW = datetime(2026, 10, 6, 13, 23, 44, tzinfo=UTC)
 
 
 def ok_response(**overrides: Any) -> dict[str, Any]:
@@ -123,8 +127,12 @@ async def async_setup(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def async_poll(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
-    """Advance time so the coordinator's polling timer fires once."""
-    freezer.tick(timedelta(seconds=61))
+    """Advance time to the coordinator's next poll and let it run."""
+    entries = hass.config_entries.async_entries(DOMAIN)
+    interval = timedelta(seconds=61)
+    if entries and entries[0].state is ConfigEntryState.LOADED:
+        interval = entries[0].runtime_data.update_interval + timedelta(seconds=1)
+    freezer.tick(interval)
     async_fire_time_changed(hass)
     # Scheduled refreshes run as config entry background tasks.
     await hass.async_block_till_done(wait_background_tasks=True)

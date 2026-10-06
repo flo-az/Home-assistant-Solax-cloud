@@ -22,6 +22,18 @@
           "api_address": "API address",
           "token_id": "Token ID"
         }
+      },
+      "reconfigure": {
+        "title": "Change Solax Cloud connection",
+        "description": "Update the API address or token ID for dongle {serial}, as shown on the API page in Solax Cloud.",
+        "data": {
+          "api_address": "API address",
+          "token_id": "Token ID"
+        },
+        "data_description": {
+          "api_address": "Shown on the API page next to the token ID.",
+          "token_id": "Shown on the API page of Solax Cloud."
+        }
       }
     },
     "error": {
@@ -33,7 +45,8 @@
     "abort": {
       "already_configured": "This dongle is already configured.",
       "already_in_progress": "This dongle is already being set up.",
-      "reauth_successful": "The new token works; Solax Cloud is connected again."
+      "reauth_successful": "The new token works; Solax Cloud is connected again.",
+      "reconfigure_successful": "The new settings work; Solax Cloud is connected."
     }
   },
   "entity": {
@@ -163,6 +176,26 @@
       "solar_energy": {
         "name": "Solar energy"
       }
+    }
+  },
+  "exceptions": {
+    "cannot_connect": {
+      "message": "Could not connect to Solax Cloud: {error}"
+    },
+    "api_error": {
+      "message": "Solax Cloud could not process the request: {error}"
+    },
+    "invalid_token": {
+      "message": "Solax Cloud refused the token ID: {error}"
+    },
+    "serial_not_in_account": {
+      "message": "Dongle {serial} is not in the account of this token ID; if the dongle was replaced, add the integration again: {error}"
+    }
+  },
+  "issues": {
+    "dongle_offline": {
+      "title": "Solax dongle {serial} is not uploading",
+      "description": "Solax Cloud has no data from dongle {serial} since {last_upload}. Its live readings are shown as unavailable until it uploads again. Check that the dongle has power and network; this notice disappears by itself once data arrives."
     }
   }
 }

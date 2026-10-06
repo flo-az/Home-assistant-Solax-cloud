@@ -1,0 +1,201 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Mit Solax Cloud verbinden",
+        "description": "Kopiere API-Adresse und Token-ID von der API-Seite in Solax Cloud (die Schaltfläche „API“ oben auf der Seite).",
+        "data": {
+          "api_address": "API-Adresse",
+          "token_id": "Token-ID",
+          "serial_number": "Seriennummer des Dongles"
+        },
+        "data_description": {
+          "api_address": "Steht auf der API-Seite neben der Token-ID.",
+          "token_id": "Steht auf der API-Seite von Solax Cloud.",
+          "serial_number": "Registriernummer des Pocket-WiFi-/LAN-Dongles, nicht die Seriennummer des Wechselrichters."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Solax-Cloud-Token benötigt",
+        "description": "Solax Cloud hat die Token-ID oder die Seriennummer {serial} des Dongles abgelehnt. Tokens aus der Zeit vor der v2-API funktionieren eventuell nicht mehr: Kopiere die aktuelle API-Adresse und Token-ID von der API-Seite in Solax Cloud. Wurde der Dongle getauscht, entferne diese Integration und füge sie mit der neuen Seriennummer erneut hinzu.",
+        "data": {
+          "api_address": "API-Adresse",
+          "token_id": "Token-ID"
+        }
+      },
+      "reconfigure": {
+        "title": "Verbindung zu Solax Cloud ändern",
+        "description": "Ändere die API-Adresse oder Token-ID für den Dongle {serial}, wie sie auf der API-Seite in Solax Cloud stehen.",
+        "data": {
+          "api_address": "API-Adresse",
+          "token_id": "Token-ID"
+        },
+        "data_description": {
+          "api_address": "Steht auf der API-Seite neben der Token-ID.",
+          "token_id": "Steht auf der API-Seite von Solax Cloud."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Keine Verbindung zu Solax Cloud. Prüfe das Netzwerk und versuche es erneut.",
+      "invalid_token": "Solax Cloud hat diese Token-ID abgelehnt. Kopiere die aktuelle von der API-Seite.",
+      "serial_not_in_account": "Diese Seriennummer gehört nicht zum Konto dieser Token-ID. Verwende die Registriernummer des Dongles, nicht die Seriennummer des Wechselrichters.",
+      "api_error": "Solax Cloud konnte die Anfrage nicht verarbeiten oder hat noch keine Daten für diesen Dongle. Versuche es später erneut."
+    },
+    "abort": {
+      "already_configured": "Dieser Dongle ist bereits eingerichtet.",
+      "already_in_progress": "Dieser Dongle wird bereits eingerichtet.",
+      "reauth_successful": "Der neue Token funktioniert; Solax Cloud ist wieder verbunden.",
+      "reconfigure_successful": "Die neuen Einstellungen funktionieren; Solax Cloud ist verbunden."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "inverter_serial": {
+        "name": "Seriennummer Wechselrichter"
+      },
+      "pocket_serial": {
+        "name": "Seriennummer Dongle"
+      },
+      "inverter_status": {
+        "name": "Status Wechselrichter",
+        "state": {
+          "waiting": "Wartet auf Betrieb",
+          "self_test": "Selbsttest",
+          "normal": "Normal",
+          "recoverable_fault": "Behebbarer Fehler",
+          "permanent_fault": "Dauerhafter Fehler",
+          "firmware_upgrade": "Firmware-Update",
+          "eps_detection": "EPS-Erkennung",
+          "off_grid": "Inselbetrieb",
+          "self_test_italy": "Selbsttest (italienische Sicherheitsvorschriften)",
+          "sleep": "Ruhemodus",
+          "standby": "Standby",
+          "pv_wake_up_battery": "PV weckt Batterie",
+          "generator_detection": "Generatorerkennung",
+          "generator": "Generatorbetrieb",
+          "fast_shutdown_standby": "Schnellabschaltung (Standby)",
+          "vpp": "VPP-Modus",
+          "tou_self_use": "TOU Eigenverbrauch",
+          "tou_charging": "TOU Laden",
+          "tou_discharging": "TOU Entladen",
+          "tou_battery_off": "TOU Batterie aus",
+          "tou_peak_shaving": "TOU Lastspitzenkappung",
+          "generator_normal_operation": "Normaler Generatorbetrieb",
+          "battery_expansion": "Batterieerweiterung",
+          "on_grid_battery_heating": "Batterieheizung (Netzbetrieb)",
+          "eps_battery_heating": "Batterieheizung (EPS)",
+          "normal_r1": "Normalbetrieb (R-1)",
+          "normal_r2": "Normalbetrieb (R-2)",
+          "normal_r3": "Normalbetrieb (R-3)",
+          "normal_r4": "Normalbetrieb (R-4)",
+          "normal_r5": "Normalbetrieb (R-5)",
+          "normal_r6": "Normalbetrieb (R-6)",
+          "normal_r7": "Normalbetrieb (R-7)",
+          "normal_ss": "Normalbetrieb (SS)",
+          "self_use": "Eigenverbrauch",
+          "force_time_use": "Zeitgesteuerte Nutzung",
+          "back_up": "Notstrommodus",
+          "feedin_priority": "Einspeisevorrang",
+          "demand": "Bedarfsmodus",
+          "constant_power": "Konstantleistung",
+          "openadr": "OpenADR-Modus"
+        }
+      },
+      "ac_power": {
+        "name": "AC-Leistung"
+      },
+      "yield_today": {
+        "name": "Ertrag heute"
+      },
+      "yield_total": {
+        "name": "Ertrag gesamt"
+      },
+      "feedin_power": {
+        "name": "Einspeiseleistung"
+      },
+      "feedin_energy": {
+        "name": "Eingespeiste Energie"
+      },
+      "consume_energy": {
+        "name": "Netzbezug"
+      },
+      "meter2_power": {
+        "name": "Leistung Zähler 2"
+      },
+      "mppt1_power": {
+        "name": "Leistung MPPT1"
+      },
+      "mppt2_power": {
+        "name": "Leistung MPPT2"
+      },
+      "mppt3_power": {
+        "name": "Leistung MPPT3"
+      },
+      "mppt4_power": {
+        "name": "Leistung MPPT4"
+      },
+      "total_solar_power": {
+        "name": "Solarleistung gesamt"
+      },
+      "battery_power": {
+        "name": "Batterieleistung"
+      },
+      "soc": {
+        "name": "Ladezustand"
+      },
+      "battery_status": {
+        "name": "Status Batterie",
+        "state": {
+          "normal": "Normal",
+          "fault": "Fehler",
+          "disconnected": "Getrennt"
+        }
+      },
+      "eps_phase1_power": {
+        "name": "EPS-Leistung Phase 1"
+      },
+      "eps_phase2_power": {
+        "name": "EPS-Leistung Phase 2"
+      },
+      "eps_phase3_power": {
+        "name": "EPS-Leistung Phase 3"
+      },
+      "upload_time": {
+        "name": "Letzter Cloud-Upload"
+      },
+      "utc_date_time": {
+        "name": "Upload-Zeit"
+      },
+      "battery_charge_energy": {
+        "name": "Batterie geladene Energie"
+      },
+      "battery_discharge_energy": {
+        "name": "Batterie entladene Energie"
+      },
+      "solar_energy": {
+        "name": "Solarenergie"
+      }
+    }
+  },
+  "exceptions": {
+    "cannot_connect": {
+      "message": "Keine Verbindung zu Solax Cloud: {error}"
+    },
+    "api_error": {
+      "message": "Solax Cloud konnte die Anfrage nicht verarbeiten: {error}"
+    },
+    "invalid_token": {
+      "message": "Solax Cloud hat die Token-ID abgelehnt: {error}"
+    },
+    "serial_not_in_account": {
+      "message": "Dongle {serial} gehört nicht zum Konto dieser Token-ID; wurde der Dongle getauscht, füge die Integration erneut hinzu: {error}"
+    }
+  },
+  "issues": {
+    "dongle_offline": {
+      "title": "Solax-Dongle {serial} sendet keine Daten",
+      "description": "Solax Cloud hat seit {last_upload} keine Daten vom Dongle {serial}. Seine Live-Werte werden als nicht verfügbar angezeigt, bis er wieder sendet. Prüfe Stromversorgung und Netzwerk des Dongles; dieser Hinweis verschwindet von selbst, sobald wieder Daten ankommen."
+    }
+  }
+}

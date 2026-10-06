@@ -147,3 +147,38 @@ class SolaxCloudConfigFlow(ConfigFlow, domain=DOMAIN):
             description_placeholders={"serial": entry.data[CONF_SERIAL]},
             errors=errors,
         )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Change the API address or token of an existing entry."""
+        entry = self._get_reconfigure_entry()
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            api_address = normalize_api_address(user_input[CONF_API_ADDRESS])
+            errors = await self._async_validate(
+                api_address, user_input[CONF_TOKEN], entry.data[CONF_SERIAL]
+            )
+            if not errors:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data_updates={
+                        CONF_API_ADDRESS: api_address,
+                        CONF_TOKEN: user_input[CONF_TOKEN].strip(),
+                    },
+                )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema({**API_ADDRESS_FIELD, **TOKEN_FIELD}),
+                {
+                    CONF_API_ADDRESS: entry.data.get(
+                        CONF_API_ADDRESS, DEFAULT_API_ADDRESS
+                    )
+                },
+            ),
+            description_placeholders={"serial": entry.data[CONF_SERIAL]},
+            errors=errors,
+        )

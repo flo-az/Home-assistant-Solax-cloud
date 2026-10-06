@@ -77,10 +77,13 @@ async def test_regression_form_fields_have_labels(
     [reauth_form] = config_entry.async_get_active_flows(hass, {"reauth"})
     reauth_form = await hass.config_entries.flow.async_configure(reauth_form["flow_id"])
 
+    reconfigure_form = await config_entry.start_reconfigure_flow(hass)
+
     assert {
         "user": _missing_labels(user_form, strings),
         "reauth_confirm": _missing_labels(reauth_form, strings),
-    } == {"user": [], "reauth_confirm": []}
+        "reconfigure": _missing_labels(reconfigure_form, strings),
+    } == {"user": [], "reauth_confirm": [], "reconfigure": []}
 
 
 @pytest.mark.usefixtures("mock_setup_entry")

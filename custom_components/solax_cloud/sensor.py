@@ -16,21 +16,24 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import (
+    EntityCategory,
     MAX_LENGTH_STATE_STATE,
     PERCENTAGE,
     UnitOfEnergy,
     UnitOfPower,
 )
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
 from .coordinator import SolaxCloudConfigEntry, SolaxCloudCoordinator
+from .entity import SolaxCloudEntity
 from .energy import EMPTY, EnergySeries, restored_series, step
+from .polling import upload_instant
+
+# All sensors read the coordinator's data; none sends requests itself.
+PARALLEL_UPDATES = 0
 
 PV_KEYS = ["powerdc1", "powerdc2", "powerdc3", "powerdc4"]
 
@@ -85,11 +88,6 @@ INVERTER_STATUS = {
 BATTERY_STATUS = {"0": "normal", "1": "fault", "2": "disconnected"}
 
 
-def sensor_unique_id(entry_unique_id: str, key: str) -> str:
-    """Unique id of the sensor for an API field (kept from early versions)."""
-    return f"{entry_unique_id}_test_{key}"
-
-
 def _number(value: Any) -> int | float | None:
     """A reading as the API documents it (a plausible number), else None."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -103,23 +101,6 @@ def _text(value: Any) -> str | None:
     if isinstance(value, str) and len(value) <= MAX_LENGTH_STATE_STATE:
         return value
     return None
-
-
-def _upload_instant(data: dict[str, Any]) -> datetime | None:
-    """When the data was uploaded; v2 sends utcDateTime in real UTC.
-
-    (v1 sent the plant's wall time read as UTC+8 instead.)
-    """
-    value = data.get("utcDateTime")
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=dt_util.UTC)
-        return parsed.astimezone(dt_util.UTC)
-    except (ValueError, OverflowError):
-        return None
 
 
 def _pv_total(data: dict[str, Any]) -> int | float | None:
@@ -141,6 +122,8 @@ class SolaxSensorEntityDescription(SensorEntityDescription):
     """A sensor and how to read its value from the realtime result."""
 
     value_fn: Callable[[dict[str, Any]], StateType | datetime]
+    # A reading of the moment: unavailable once its upload is stale.
+    live: bool = False
 
 
 def _status(
@@ -153,6 +136,7 @@ def _status(
         options=list(codes.values()),
         # Undocumented codes give unknown rather than an invalid option.
         value_fn=lambda data: codes.get(str(data.get(key))),
+        live=True,
     )
 
 
@@ -167,6 +151,7 @@ def _power(
         state_class=SensorStateClass.MEASUREMENT,
         entity_registry_enabled_default=enabled,
         value_fn=_number_of(key),
+        live=True,
     )
 
 
@@ -187,10 +172,14 @@ SENSOR_TYPES: list[SolaxSensorEntityDescription] = [
     SolaxSensorEntityDescription(
         key="inverterSN",
         translation_key="inverter_serial",
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_text_of("inverterSN"),
     ),
     SolaxSensorEntityDescription(
-        key="sn", translation_key="pocket_serial", value_fn=_text_of("sn")
+        key="sn",
+        translation_key="pocket_serial",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_text_of("sn"),
     ),
     _status("inverterStatus", "inverter_status", INVERTER_STATUS),
     _power("acpower", "ac_power"),
@@ -211,6 +200,7 @@ SENSOR_TYPES: list[SolaxSensorEntityDescription] = [
         native_unit_of_measurement=UnitOfPower.WATT,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=_pv_total,
+        live=True,
     ),
     _power("batPower", "battery_power"),
     SolaxSensorEntityDescription(
@@ -220,19 +210,24 @@ SENSOR_TYPES: list[SolaxSensorEntityDescription] = [
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=_number_of("soc"),
+        live=True,
     ),
     _status("batStatus", "battery_status", BATTERY_STATUS),
     _power("peps1", "eps_phase1_power"),
     _power("peps2", "eps_phase2_power"),
     _power("peps3", "eps_phase3_power"),
     SolaxSensorEntityDescription(
-        key="uploadTime", translation_key="upload_time", value_fn=_text_of("uploadTime")
+        key="uploadTime",
+        translation_key="upload_time",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_text_of("uploadTime"),
     ),
     SolaxSensorEntityDescription(
         key="utcDateTime",
         translation_key="utc_date_time",
         device_class=SensorDeviceClass.TIMESTAMP,
-        value_fn=_upload_instant,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=upload_instant,
     ),
 ]
 
@@ -302,34 +297,17 @@ async def async_setup_entry(
     )
 
 
-class SolaxCloudEntity(CoordinatorEntity[SolaxCloudCoordinator]):
-    """An entity of the dongle's device."""
-
-    _attr_has_entity_name = True
-
-    def __init__(
-        self,
-        unique_id: str,
-        description: SensorEntityDescription,
-        coordinator: SolaxCloudCoordinator,
-    ) -> None:
-        """Initialize the entity."""
-        super().__init__(coordinator)
-        self.entity_description = description
-        self._attr_unique_id = sensor_unique_id(unique_id, description.key)
-        serial = coordinator.client.serial
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, unique_id)},
-            name=serial,
-            manufacturer="SolaX Power",
-            serial_number=serial,
-        )
-
-
 class SolaxCloudSensor(SolaxCloudEntity, SensorEntity):
     """A value of the realtime result."""
 
     entity_description: SolaxSensorEntityDescription
+
+    @property
+    def available(self) -> bool:
+        """Live readings from a stale upload are not shown as current."""
+        return super().available and not (
+            self.entity_description.live and self.coordinator.stale
+        )
 
     @property
     def native_value(self) -> StateType | datetime:
@@ -425,7 +403,7 @@ class IntegratedEnergySensor(SolaxCloudEntity, RestoreSensor):
         super()._handle_coordinator_update()
 
     def _add_upload(self, data: dict[str, Any] | None) -> None:
-        if not data or (upload := _upload_instant(data)) is None:
+        if not data or (upload := upload_instant(data)) is None:
             return
         power = self.entity_description.power_fn(data)
         self._series, above, below = step(

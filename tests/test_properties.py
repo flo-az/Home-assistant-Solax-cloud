@@ -31,6 +31,7 @@ from custom_components.solax_cloud.const import (
     DOMAIN,
 )
 from custom_components.solax_cloud.energy import EMPTY, step
+from custom_components.solax_cloud.polling import is_stale
 
 from .common import (
     API_ADDRESS,
@@ -73,6 +74,20 @@ NUMERIC_KEYS = [
 ]
 PV_KEYS = ["powerdc1", "powerdc2", "powerdc3", "powerdc4"]
 STATUS_KEYS = ["inverterStatus", "batStatus"]
+# Readings of the moment, unavailable while their upload is stale.
+LIVE_KEYS = {
+    "acpower",
+    "feedinpower",
+    "soc",
+    "peps1",
+    "peps2",
+    "peps3",
+    "batPower",
+    "powerdc1",
+    "powerdc2",
+    "total_solar_power",
+    *STATUS_KEYS,
+}
 TEXT_KEYS = ["inverterSN", "sn", "uploadTime"]
 SENSOR_KEYS = [
     *NUMERIC_KEYS,
@@ -218,7 +233,14 @@ async def test_property_sensors_follow_every_poll(
             continue
 
         result = response["json"]["result"]
+        stale = is_stale(result, dt_util.utcnow())
+        if stale:
+            assert {k: state(hass, k) for k in LIVE_KEYS} == dict.fromkeys(
+                LIVE_KEYS, STATE_UNAVAILABLE
+            )
         for key in NUMERIC_KEYS:
+            if stale and key in LIVE_KEYS:
+                continue
             if result[key] is None:
                 assert state(hass, key) == STATE_UNKNOWN, key
             else:
@@ -227,13 +249,15 @@ async def test_property_sensors_follow_every_poll(
                     result[key], rel=1e-14
                 ), key
         pv_readings = [result[k] for k in PV_KEYS if result[k] is not None]
-        if pv_readings:
+        if stale:
+            pass
+        elif pv_readings:
             assert float(state(hass, "total_solar_power")) == pytest.approx(
                 sum(pv_readings), rel=1e-14
             )
         else:
             assert state(hass, "total_solar_power") == STATE_UNKNOWN
-        for key in STATUS_KEYS:
+        for key in STATUS_KEYS if not stale else []:
             shown = state(hass, key)
             if result[key] in KNOWN_STATUS[key]:
                 assert shown == KNOWN_STATUS[key][result[key]], key
@@ -292,9 +316,10 @@ async def test_property_any_json_body_is_handled(
         and body.get("success") is True
         and isinstance(body.get("result"), dict)
     )
+    stale = well_formed and is_stale(body["result"], dt_util.utcnow())
     for key in SENSOR_KEYS:
         shown = state(hass, key)
-        if not well_formed:
+        if not well_formed or (stale and key in LIVE_KEYS):
             assert shown == STATE_UNAVAILABLE, key
         elif key in NUMERIC_KEYS or key == "total_solar_power":
             assert shown == STATE_UNKNOWN or math.isfinite(float(shown)), key

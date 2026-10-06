@@ -251,3 +251,59 @@ async def test_reauth_keeps_form_open_on_failure(
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": error}
     assert config_entry.data[CONF_TOKEN] == TOKEN
+
+
+@pytest.mark.usefixtures("mock_setup_entry")
+async def test_reconfigure_changes_address_and_token(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """The API address and token can be changed without waiting for a failure."""
+    respond(
+        aioclient_mock,
+        url=f"https://euapi.solaxcloud.com{API_PATH}",
+        json=ok_response(),
+    )
+    flow = await config_entry.start_reconfigure_flow(hass)
+    assert flow["step_id"] == "reconfigure"
+
+    result = await hass.config_entries.flow.async_configure(
+        flow["flow_id"],
+        {CONF_API_ADDRESS: "euapi.solaxcloud.com/", CONF_TOKEN: NEW_TOKEN},
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert config_entry.data == {
+        CONF_API_ADDRESS: "https://euapi.solaxcloud.com",
+        CONF_TOKEN: NEW_TOKEN,
+        CONF_SERIAL: SERIAL,
+    }
+
+
+@pytest.mark.parametrize(
+    ("response", "error"),
+    [
+        ({"json": TOKEN_REJECTED}, "invalid_token"),
+        ({"json": SERIAL_REJECTED}, "serial_not_in_account"),
+        ({"status": 503}, "cannot_connect"),
+    ],
+)
+async def test_reconfigure_keeps_settings_on_failure(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    response: dict[str, Any],
+    error: str,
+) -> None:
+    """Settings that do not work are reported and not saved."""
+    respond(aioclient_mock, **response)
+    flow = await config_entry.start_reconfigure_flow(hass)
+
+    result = await hass.config_entries.flow.async_configure(
+        flow["flow_id"], {CONF_API_ADDRESS: API_ADDRESS, CONF_TOKEN: NEW_TOKEN}
+    )
+
+    assert result["errors"] == {"base": error}
+    assert config_entry.data[CONF_TOKEN] == TOKEN

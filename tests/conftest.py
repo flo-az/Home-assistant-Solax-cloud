@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from unittest.mock import AsyncMock, patch
 
+from freezegun.api import FrozenDateTimeFactory
 import pytest
 
 from homeassistant.core import HomeAssistant
@@ -20,12 +21,26 @@ from custom_components.solax_cloud.const import (
     DOMAIN,
 )
 
-from .common import API_ADDRESS, SERIAL, TOKEN, UNIQUE_ID, ok_response, respond
+from .common import (
+    API_ADDRESS,
+    LIVE_SAMPLE_NOW,
+    SERIAL,
+    TOKEN,
+    UNIQUE_ID,
+    ok_response,
+    respond,
+)
 
 
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
     """Load integrations from custom_components/."""
+
+
+@pytest.fixture(autouse=True)
+def live_sample_time(freezer: FrozenDateTimeFactory) -> None:
+    """Run tests 40 s after the live sample's upload, so its data is current."""
+    freezer.move_to(LIVE_SAMPLE_NOW)
 
 
 @pytest.fixture

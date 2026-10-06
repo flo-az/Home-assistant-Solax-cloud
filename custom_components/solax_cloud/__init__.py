@@ -16,7 +16,8 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import SolaxCloudConfigEntry, SolaxCloudCoordinator
-from .sensor import ALL_KEYS, sensor_unique_id
+from .entity import sensor_unique_id
+from .sensor import ALL_KEYS
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 
