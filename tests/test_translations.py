@@ -74,9 +74,7 @@ async def test_regression_form_fields_have_labels(
     respond(aioclient_mock, json=TOKEN_REJECTED)
     await async_setup(hass, config_entry)
     [reauth_form] = config_entry.async_get_active_flows(hass, {"reauth"})
-    reauth_form = await hass.config_entries.flow.async_configure(
-        reauth_form["flow_id"]
-    )
+    reauth_form = await hass.config_entries.flow.async_configure(reauth_form["flow_id"])
 
     assert {
         "user": _missing_labels(user_form, strings),

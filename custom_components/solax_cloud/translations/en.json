@@ -37,7 +37,14 @@
   },
   "entity": {
     "sensor": {
+      "inverter_serial": {
+        "name": "Inverter serial"
+      },
+      "pocket_serial": {
+        "name": "Dongle serial"
+      },
       "inverter_status": {
+        "name": "Inverter status",
         "state": {
           "waiting": "Waiting for operation",
           "self_test": "Self-test",
@@ -81,12 +88,76 @@
           "openadr": "OpenADR mode"
         }
       },
+      "ac_power": {
+        "name": "AC power"
+      },
+      "yield_today": {
+        "name": "Yield today"
+      },
+      "yield_total": {
+        "name": "Yield total"
+      },
+      "feedin_power": {
+        "name": "Feed-in power"
+      },
+      "feedin_energy": {
+        "name": "Feed-in energy"
+      },
+      "consume_energy": {
+        "name": "Grid import energy"
+      },
+      "meter2_power": {
+        "name": "Meter 2 power"
+      },
+      "mppt1_power": {
+        "name": "MPPT1 power"
+      },
+      "mppt2_power": {
+        "name": "MPPT2 power"
+      },
+      "mppt3_power": {
+        "name": "MPPT3 power"
+      },
+      "mppt4_power": {
+        "name": "MPPT4 power"
+      },
+      "total_solar_power": {
+        "name": "Total solar power"
+      },
+      "battery_power": {
+        "name": "Battery power"
+      },
+      "soc": {
+        "name": "State of charge"
+      },
       "battery_status": {
+        "name": "Battery status",
         "state": {
           "normal": "Normal",
           "fault": "Fault",
           "disconnected": "Disconnected"
         }
+      },
+      "eps_phase1_power": {
+        "name": "EPS phase 1 power"
+      },
+      "eps_phase2_power": {
+        "name": "EPS phase 2 power"
+      },
+      "eps_phase3_power": {
+        "name": "EPS phase 3 power"
+      },
+      "upload_time": {
+        "name": "Last cloud upload"
+      },
+      "utc_date_time": {
+        "name": "Upload time"
+      },
+      "battery_charge_energy": {
+        "name": "Battery charge energy"
+      },
+      "battery_discharge_energy": {
+        "name": "Battery discharge energy"
       }
     }
   }

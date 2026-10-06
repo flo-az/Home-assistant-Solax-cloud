@@ -57,6 +57,11 @@ class SolaxCloudClient:
         self._token = token.strip()
         self._serial = serial.strip()
 
+    @property
+    def serial(self) -> str:
+        """Serial number of the dongle."""
+        return self._serial
+
     async def async_get_realtime_data(self) -> dict[str, Any]:
         """Return the realtime result object."""
         try:

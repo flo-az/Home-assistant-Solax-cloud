@@ -161,7 +161,9 @@ async def test_regression_same_dongle_with_whitespace_is_a_duplicate(
     The unique id stripped the formatted string, not the serial, so
     "SolaxCloud_ SW..." did not match the existing "SolaxCloud_SW...".
     """
-    result = await _submit(hass, await _start(hass), {**USER_INPUT, CONF_SERIAL: serial})
+    result = await _submit(
+        hass, await _start(hass), {**USER_INPUT, CONF_SERIAL: serial}
+    )
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"

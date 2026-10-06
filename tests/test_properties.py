@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+import itertools
 import math
 import sys
 from typing import Any
@@ -115,8 +116,10 @@ json_values = st.recursive(
     | st.integers(min_value=-(2**63), max_value=2**63 - 1)
     | st.floats(allow_nan=False)
     | st.text(max_size=300),
-    lambda children: st.lists(children, max_size=3)
-    | st.dictionaries(st.text(max_size=8), children, max_size=3),
+    lambda children: (
+        st.lists(children, max_size=3)
+        | st.dictionaries(st.text(max_size=8), children, max_size=3)
+    ),
     max_leaves=8,
 )
 
@@ -380,3 +383,76 @@ async def test_property_padded_serial_is_same_dongle(
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
     assert aioclient_mock.call_count == 0
+
+
+# Each example starts a day after the previous one, so the battery series
+# restored from the last example never reaches into this one.
+EXAMPLE_DAYS = itertools.count(1)
+battery_steps = st.lists(
+    st.tuples(
+        st.sampled_from(["upload", "upload", "upload", "repeat", "fail"]),
+        st.floats(min_value=0.5, max_value=20),
+        st.none() | st.floats(min_value=-10_000, max_value=10_000),
+    ),
+    min_size=1,
+    max_size=8,
+)
+
+
+@SHARED_HASS
+@given(steps=battery_steps)
+async def test_property_battery_energy_only_counts_up(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+    steps: list[tuple[str, float, float | None]],
+) -> None:
+    """Battery energy totals never decrease and stay physically plausible.
+
+    Energy only goes to the side the power points to, and the energy added
+    never exceeds the largest power seen times the time elapsed.
+    """
+    await _fresh_entry(hass, config_entry, aioclient_mock)
+    start = (
+        float(state(hass, "battery_charge_energy")),
+        float(state(hass, "battery_discharge_energy")),
+    )
+    previous = start
+    at = datetime(2026, 1, 1, tzinfo=UTC) + timedelta(days=next(EXAMPLE_DAYS))
+    first_upload, power = at, None
+    powers: list[float] = []
+
+    for kind, gap_minutes, new_power in steps:
+        if kind == "fail":
+            respond(aioclient_mock, json=OPERATION_FAILED)
+        else:
+            if kind == "upload":
+                at += timedelta(minutes=gap_minutes)
+                power = new_power
+            if power is not None:
+                powers.append(power)
+            respond(
+                aioclient_mock,
+                json=ok_response(
+                    batPower=power, utcDateTime=at.strftime("%Y-%m-%dT%H:%M:%SZ")
+                ),
+            )
+        await async_poll(hass, freezer)
+        if kind == "fail":
+            continue
+        current = (
+            float(state(hass, "battery_charge_energy")),
+            float(state(hass, "battery_discharge_energy")),
+        )
+        assert current[0] >= previous[0] and current[1] >= previous[1]
+        previous = current
+
+    charged, discharged = previous[0] - start[0], previous[1] - start[1]
+    if all(p >= 0 for p in powers):
+        assert discharged == pytest.approx(0, abs=1e-12)
+    if all(p <= 0 for p in powers):
+        assert charged == pytest.approx(0, abs=1e-12)
+    largest = max((abs(p) for p in powers), default=0)
+    elapsed_hours = (at - first_upload).total_seconds() / 3600
+    assert charged + discharged <= largest * elapsed_hours / 1000 + 1e-9

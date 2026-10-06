@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
@@ -16,23 +15,21 @@ from .const import (
     DEFAULT_API_ADDRESS,
     DOMAIN,
 )
-from .coordinator import solaxcloudCoordinator
-from .sensor import SENSOR_TYPES, sensor_unique_id
+from .coordinator import SolaxCloudConfigEntry, SolaxCloudCoordinator
+from .sensor import ALL_KEYS, sensor_unique_id
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: SolaxCloudConfigEntry) -> bool:
     """Set up Solax Cloud from a config entry."""
-
     client = SolaxCloudClient(
         async_get_clientsession(hass),
         entry.data.get(CONF_API_ADDRESS, DEFAULT_API_ADDRESS),
         entry.data[CONF_TOKEN],
         entry.data[CONF_SERIAL],
     )
-
-    coordinator = solaxcloudCoordinator(hass, entry, client)
+    coordinator = SolaxCloudCoordinator(hass, entry, client)
 
     # Raises ConfigEntryNotReady on a failed request, so Home Assistant
     # retries setup, or ConfigEntryAuthFailed, which asks for a new token.
@@ -40,13 +37,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _async_clean_up_entities(hass, entry)
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
 @callback
-def _async_clean_up_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
+def _async_clean_up_entities(hass: HomeAssistant, entry: SolaxCloudConfigEntry) -> None:
     """Bring registry entries from earlier versions in line with the sensors.
 
     The inverter serial used to read the misspelt field "inverterSn"; its
@@ -62,15 +59,12 @@ def _async_clean_up_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
     ) and not registry.async_get_entity_id("sensor", DOMAIN, new_serial):
         registry.async_update_entity(old_entity, new_unique_id=new_serial)
 
-    current = {sensor_unique_id(entry.unique_id, d.key) for d in SENSOR_TYPES}
+    current = {sensor_unique_id(entry.unique_id, key) for key in ALL_KEYS}
     for registered in er.async_entries_for_config_entry(registry, entry.entry_id):
         if registered.unique_id not in current:
             registry.async_remove(registered.entity_id)
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: SolaxCloudConfigEntry) -> bool:
     """Unload Solax config entry."""
-    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        hass.data[DOMAIN].pop(entry.entry_id)
-
-    return unload_ok
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

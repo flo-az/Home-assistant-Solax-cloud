@@ -95,7 +95,9 @@ async def test_implausible_numbers_are_unknown(
     """Readings no plant produces never reach a state."""
     respond(
         aioclient_mock,
-        json=ok_response(acpower=1.0e300, soc=-(10**18), powerdc1=1.0e308, powerdc2=1.0e308),
+        json=ok_response(
+            acpower=1.0e300, soc=-(10**18), powerdc1=1.0e308, powerdc2=1.0e308
+        ),
     )
 
     await async_setup(hass, config_entry)

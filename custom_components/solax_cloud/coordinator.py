@@ -1,4 +1,6 @@
-"""Coordinator for solaxcloud."""
+"""Coordinator for the Solax Cloud integration."""
+
+from __future__ import annotations
 
 from datetime import timedelta
 from typing import Any
@@ -11,12 +13,19 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api import SolaxCloudAuthError, SolaxCloudClient, SolaxCloudError
 from .const import DOMAIN, LOGGER
 
+type SolaxCloudConfigEntry = ConfigEntry[SolaxCloudCoordinator]
 
-class solaxcloudCoordinator(DataUpdateCoordinator[dict[str, Any]]):
-    """Class to manage fetching solax cloud data."""
+
+class SolaxCloudCoordinator(DataUpdateCoordinator[dict[str, Any]]):
+    """Polls the realtime data of one dongle."""
+
+    config_entry: SolaxCloudConfigEntry
 
     def __init__(
-        self, hass: HomeAssistant, entry: ConfigEntry, client: SolaxCloudClient
+        self,
+        hass: HomeAssistant,
+        entry: SolaxCloudConfigEntry,
+        client: SolaxCloudClient,
     ) -> None:
         """Initialize."""
         super().__init__(
