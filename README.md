@@ -1,8 +1,8 @@
 # Solax Cloud for Home Assistant
 
 Reads your SolaX inverter's live data from Solax Cloud (realtime API v2) into
-Home Assistant, including battery charge and discharge energy for the energy
-dashboard.
+Home Assistant, including solar, battery charge and battery discharge energy
+for the energy dashboard.
 
 The data comes from the cloud, so it updates as often as your Pocket WiFi/LAN
 dongle uploads (typically every 5 minutes). The integration polls every
@@ -29,11 +29,12 @@ page). You need:
 
 If Solax Cloud later refuses the token (for example after you regenerate it,
 or a token from before the v2 API), Home Assistant asks for a new one under
-*Settings → Devices & services*.
+*Settings → Devices & services*. If you replace the dongle, remove the
+integration and add it again with the new dongle's serial number.
 
 ## Sensors
 
-One sensor per field of the realtime API, plus two computed ones:
+One sensor per field of the realtime API, plus four computed ones:
 
 | Sensor | Unit | Notes |
 |---|---|---|
@@ -44,28 +45,39 @@ One sensor per field of the realtime API, plus two computed ones:
 | Battery power | W | Positive while charging, negative while discharging |
 | State of charge | % | |
 | Battery status | | Normal, fault, disconnected |
-| Battery charge energy, Battery discharge energy | kWh | Computed, see below |
-| Yield today, Yield total | kWh | Solar production |
+| Solar energy | kWh | Computed from total solar power, see below |
+| Battery charge energy, Battery discharge energy | kWh | Computed from battery power, see below |
+| Yield today, Yield total | kWh | The inverter's AC output: includes battery discharge, excludes solar stored in the battery |
 | Feed-in energy | kWh | Total exported to the grid |
 | Grid import energy | kWh | Total imported from the grid |
 | EPS phase 1–3 power | W | Backup output |
 | Meter 2 power | W | Disabled by default |
 | Inverter status | | Normal, standby, off-grid, … ([full list](custom_components/solax_cloud/sensor.py)) |
-| Upload time | | When the data was uploaded (UTC timestamp) |
-| Last cloud upload | | The same, as the plant's local time text |
+| Upload time | | When the data was uploaded |
+| Last cloud upload | | The same, as text in the plant's local time |
 | Inverter serial, Dongle serial | | |
 
 Values the API does not report for your system (for example no battery) are
-*unknown*. While Solax Cloud is unreachable, all sensors are *unavailable*.
+*unknown*, and the energy computed from them stays at 0 kWh. While Solax Cloud
+is unreachable, all sensors are *unavailable*.
 
-### Battery energy
+### Solar and battery energy
 
-The API only reports the battery's power at each upload. *Battery charge
-energy* and *Battery discharge energy* add it up: each interval between two
-uploads counts the average of their two readings. Gaps longer than 15
-minutes (Home Assistant or the cloud was down) are skipped rather than
-guessed, and the totals survive restarts. They are estimates: compare them
-with the daily charged/discharged values in the Solax app.
+The API reports power only as a snapshot per upload; it has no energy
+counters for solar production or the battery. *Solar energy*, *Battery charge
+energy* and *Battery discharge energy* add those snapshots up, assuming power
+changes linearly between two uploads. When the battery switches between
+charging and discharging, each side gets only its part of that line.
+
+- Repeated polls of the same upload count once.
+- Gaps longer than 15 minutes (Home Assistant or the cloud was down) and
+  uploads with a missing reading are skipped rather than guessed.
+- Uploads stamped more than an hour in the future are ignored.
+- The totals survive restarts. After an unclean shutdown the interval around
+  it may be missing.
+
+They are estimates: compare a full day with the solar, charged and discharged
+values in the Solax app.
 
 ## Energy dashboard
 
@@ -75,11 +87,16 @@ Under *Settings → Dashboards → Energy*:
 |---|---|---|
 | Electricity grid | Grid consumption | Grid import energy |
 | Electricity grid | Return to grid | Feed-in energy |
-| Solar panels | Solar production | Yield total |
+| Solar panels | Solar production | Solar energy |
 | Home battery storage | Energy going in to the battery | Battery charge energy |
 | Home battery storage | Energy coming out of the battery | Battery discharge energy |
 | Home battery storage | Battery power (optional) | Battery power, **inverted** (it is positive while charging) |
 | Home battery storage | State of charge (optional) | State of charge |
+
+Use *Solar energy*, not *Yield total*, for solar production when a battery is
+configured: the yield counters already contain battery discharge, so the
+dashboard would count the battery twice and show home consumption too low
+while charging and too high afterwards.
 
 ## Development
 
