@@ -16,3 +16,6 @@ htmlcov/
 .idea/
 .vscode/
 docs/*
+
+# Hypothesis example database
+.hypothesis/

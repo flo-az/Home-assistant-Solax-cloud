@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .coordinator import solaxcloudCoordinator
@@ -71,9 +72,10 @@ class SolaxCloudSensor(CoordinatorEntity[solaxcloudCoordinator], SensorEntity):
                        pass
            return total
        if self.entity_description.key == "utcDateTime":
-           # Parse ISO 8601 timestamp string to datetime object
-           # Note: The API appears to return time in a timezone that's not actually UTC
-           # Based on user report, it's 7 hours behind actual UTC
+           # Despite the name and the "Z", Solax computes this by reading the
+           # plant's local wall time as China time (UTC+8): a CEST upload at
+           # 14:33:04 arrives as "06:33:04Z". Adding 8 h gives back the wall
+           # time, which is in the plant's (assumed: Home Assistant's) zone.
            value = self.coordinator.data.get(self.entity_description.key)
            if value is None:
                return None
@@ -81,16 +83,11 @@ class SolaxCloudSensor(CoordinatorEntity[solaxcloudCoordinator], SensorEntity):
                return value
            if isinstance(value, str):
                try:
-                   # Handle ISO 8601 format: "2025-12-28T09:43:55Z"
-                   # The API returns time that's 7 hours behind actual UTC
-                   # Parse as naive datetime first, then add 7 hours to get correct UTC
+                   # ISO 8601 format: "2025-12-28T09:43:55Z"
                    iso_string = value.replace('Z', '')
-                   dt = datetime.fromisoformat(iso_string)
-                   # Add 7 hours to correct the timezone offset
-                   dt_corrected = dt + timedelta(hours=7)
-                   # Make it timezone-aware (UTC)
-                   return dt_corrected.replace(tzinfo=timezone.utc)
-               except (ValueError, TypeError, AttributeError):
+                   wall_time = datetime.fromisoformat(iso_string) + timedelta(hours=8)
+                   return wall_time.replace(tzinfo=dt_util.get_default_time_zone())
+               except (ValueError, TypeError, AttributeError, OverflowError):
                    return None
            return None
        return self.coordinator.data.get(self.entity_description.key)

@@ -3,11 +3,8 @@ Solax cloud integration for home assistant
 
 
 todo things:
-1. Add labels to the config flow input fields, Don't know why these are not shown.
-2. Get inverter type and based on model add the correct sensor to the integration.
-3. Translation.
-4. Add HTTP retry actions when no connection is detected/solax could not responding.
-5. 
+1. Get inverter type and based on model add the correct sensor to the integration.
+2. Translations beyond English.
 
 goal:
 add integration to the official home assistant integration list.
@@ -23,3 +20,8 @@ usage:
 Installation:
 Add repository URL to custom repository in hacs
 See: https://hacs.xyz/docs/faq/custom_repositories/
+
+Development:
+1. Create a Python 3.14 virtual environment.
+2. pip install -r requirements_test.txt
+3. pytest

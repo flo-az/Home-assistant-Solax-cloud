@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from requests.exceptions import ConnectTimeout, HTTPError
+from requests.exceptions import RequestException
 from solaxcloud.solaxcloud import solaxcloud
 import voluptuous as vol
 
@@ -27,9 +27,9 @@ class SolaxCloudConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             token = user_input[CONF_TOKEN]
-            serial = user_input[CONF_SERIAL]
+            serial = user_input[CONF_SERIAL].strip()
 
-            await self.async_set_unique_id(f"SolaxCloud_{serial}".strip())
+            await self.async_set_unique_id(f"SolaxCloud_{serial}")
             self._abort_if_unique_id_configured()
 
             api = solaxcloud(token=token, registration_number=serial)
@@ -39,13 +39,11 @@ class SolaxCloudConfigFlow(ConfigFlow, domain=DOMAIN):
                     api.validate_token_and_registration_number
                 ):
                     errors = {"base": "invalid_token_or_serial"}
-            except (ConnectTimeout, HTTPError):
+            except RequestException:
                 errors = {"base": "cannot_connect"}
 
             if not errors:
-                return self.async_create_entry(
-                    title=f"{serial}".strip(), data=user_input
-                )
+                return self.async_create_entry(title=serial, data=user_input)
 
         return self.async_show_form(
             step_id="user",
