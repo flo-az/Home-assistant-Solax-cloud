@@ -18,7 +18,7 @@ from .common import UNIQUE_ID, async_setup, entity_id, state
 PREFIX = f"{UNIQUE_ID}_test_"
 
 # Every field of the documented realtime response (SolaXCloud User API V1.2,
-# 7.1) except inverterType, plus the computed PV total and battery energy.
+# 7.1) except inverterType, plus the computed PV total, battery and solar energy.
 DOCUMENTED_KEYS = {
     "inverterSN",
     "sn",
@@ -45,6 +45,7 @@ DOCUMENTED_KEYS = {
     "total_solar_power",
     "battery_charge_energy",
     "battery_discharge_energy",
+    "solar_energy",
 }
 
 

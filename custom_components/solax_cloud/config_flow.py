@@ -17,9 +17,10 @@ from homeassistant.helpers.selector import (
 
 from .api import (
     SolaxCloudApiError,
-    SolaxCloudAuthError,
     SolaxCloudClient,
     SolaxCloudConnectionError,
+    SolaxCloudSerialError,
+    SolaxCloudTokenError,
     normalize_api_address,
 )
 from .const import (
@@ -56,8 +57,10 @@ class SolaxCloudConfigFlow(ConfigFlow, domain=DOMAIN):
         )
         try:
             await client.async_get_realtime_data()
-        except SolaxCloudAuthError:
-            return {"base": "invalid_token_or_serial"}
+        except SolaxCloudTokenError:
+            return {"base": "invalid_token"}
+        except SolaxCloudSerialError:
+            return {"base": "serial_not_in_account"}
         except SolaxCloudConnectionError:
             return {"base": "cannot_connect"}
         except SolaxCloudApiError:

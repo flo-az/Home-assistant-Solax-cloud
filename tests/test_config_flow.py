@@ -25,10 +25,10 @@ from .common import (
     API_ADDRESS,
     API_PATH,
     API_URL,
-    AUTH_FAILURES,
     CONNECTION_FAILURES,
     OPERATION_FAILED,
     SERIAL,
+    SERIAL_REJECTED,
     TOKEN,
     TOKEN_REJECTED,
     UNIQUE_ID,
@@ -127,22 +127,51 @@ async def test_api_error_is_reported(
     assert result["errors"] == {"base": "api_error"}
 
 
-@pytest.mark.parametrize("response", AUTH_FAILURES)
+@pytest.mark.parametrize(
+    ("response", "error"),
+    [
+        ({"json": TOKEN_REJECTED}, "invalid_token"),
+        ({"json": SERIAL_REJECTED}, "serial_not_in_account"),
+    ],
+    ids=["token-rejected", "serial-not-in-account"],
+)
 @pytest.mark.usefixtures("mock_setup_entry")
 async def test_rejected_credentials_show_error_and_can_be_corrected(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, response: dict[str, Any]
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    response: dict[str, Any],
+    error: str,
 ) -> None:
-    """A refused token or serial keeps the form open so the user can fix it."""
+    """A refused token or serial says which, and the form stays open."""
     respond(aioclient_mock, **response)
     flow = await _start(hass)
 
     result = await _submit(hass, flow, USER_INPUT)
     assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {"base": "invalid_token_or_serial"}
+    assert result["errors"] == {"base": error}
 
     respond(aioclient_mock, json=ok_response())
     result = await _submit(hass, flow, USER_INPUT)
     assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+async def test_dongle_without_data_is_reported(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """success=true without a result (e.g. a new dongle) is an API error."""
+    respond(
+        aioclient_mock,
+        json={
+            "success": True,
+            "exception": "operation success",
+            "result": None,
+            "code": 0,
+        },
+    )
+
+    result = await _submit(hass, await _start(hass), USER_INPUT)
+
+    assert result["errors"] == {"base": "api_error"}
 
 
 @pytest.mark.parametrize(
@@ -196,7 +225,8 @@ async def test_reauth_replaces_token_and_reloads(
 @pytest.mark.parametrize(
     ("response", "error"),
     [
-        ({"json": TOKEN_REJECTED}, "invalid_token_or_serial"),
+        ({"json": TOKEN_REJECTED}, "invalid_token"),
+        ({"json": SERIAL_REJECTED}, "serial_not_in_account"),
         ({"status": 503}, "cannot_connect"),
         ({"json": OPERATION_FAILED}, "api_error"),
     ],

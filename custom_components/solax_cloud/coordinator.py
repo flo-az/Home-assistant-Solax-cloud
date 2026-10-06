@@ -10,7 +10,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import SolaxCloudAuthError, SolaxCloudClient, SolaxCloudError
+from .api import (
+    SolaxCloudClient,
+    SolaxCloudError,
+    SolaxCloudSerialError,
+    SolaxCloudTokenError,
+)
 from .const import DOMAIN, LOGGER
 
 type SolaxCloudConfigEntry = ConfigEntry[SolaxCloudCoordinator]
@@ -41,9 +46,14 @@ class SolaxCloudCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Fetch data from solax API."""
         try:
             return await self.client.async_get_realtime_data()
-        except SolaxCloudAuthError as err:
+        except SolaxCloudTokenError as err:
             raise ConfigEntryAuthFailed(
-                f"Solax Cloud refused the token ID or serial number: {err}"
+                f"Solax Cloud refused the token ID: {err}"
+            ) from err
+        except SolaxCloudSerialError as err:
+            raise ConfigEntryAuthFailed(
+                "The dongle serial number is not in the account of this token ID; "
+                f"if the dongle was replaced, add it again: {err}"
             ) from err
         except SolaxCloudError as err:
             raise UpdateFailed(str(err)) from err

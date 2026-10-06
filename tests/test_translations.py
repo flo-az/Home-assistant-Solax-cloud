@@ -29,6 +29,7 @@ from .common import (
     API_ADDRESS,
     OPERATION_FAILED,
     SERIAL,
+    SERIAL_REJECTED,
     TOKEN,
     TOKEN_REJECTED,
     async_setup,
@@ -94,6 +95,7 @@ async def test_every_flow_error_and_abort_has_text(
     for response in (
         {"exc": aiohttp.ClientConnectionError()},
         {"json": TOKEN_REJECTED},
+        {"json": SERIAL_REJECTED},
         {"json": OPERATION_FAILED},
     ):
         respond(aioclient_mock, **response)
@@ -124,7 +126,8 @@ async def test_every_flow_error_and_abort_has_text(
     strings = await _config_strings(hass)
     assert reasons == [
         "error.cannot_connect",
-        "error.invalid_token_or_serial",
+        "error.invalid_token",
+        "error.serial_not_in_account",
         "error.api_error",
         "abort.already_in_progress",
         "abort.already_configured",

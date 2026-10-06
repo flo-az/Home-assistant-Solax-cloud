@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Self
 
 from homeassistant.components.sensor import (
@@ -30,15 +30,13 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .coordinator import SolaxCloudConfigEntry, SolaxCloudCoordinator
+from .energy import EMPTY, EnergySeries, restored_series, step
 
 PV_KEYS = ["powerdc1", "powerdc2", "powerdc3", "powerdc4"]
 
 # Far beyond any plant; larger values do not survive Home Assistant's
 # 15-digit state formatting intact.
 MAX_READING = 10**15
-
-# Uploads further apart than this are not bridged when adding up energy.
-MAX_UPLOAD_GAP = timedelta(minutes=15)
 
 # SolaXCloud User API V1.2, 8.1 "Device Status Mapping".
 INVERTER_STATUS = {
@@ -130,19 +128,19 @@ def _pv_total(data: dict[str, Any]) -> int | float | None:
     return _number(sum(readings)) if readings else None
 
 
+def _number_of(key: str) -> Callable[[dict[str, Any]], int | float | None]:
+    return lambda data: _number(data.get(key))
+
+
+def _text_of(key: str) -> Callable[[dict[str, Any]], str | None]:
+    return lambda data: _text(data.get(key))
+
+
 @dataclass(frozen=True, kw_only=True)
 class SolaxSensorEntityDescription(SensorEntityDescription):
     """A sensor and how to read its value from the realtime result."""
 
-    value_fn: Callable[[dict[str, Any]], StateType | datetime] | None = None
-
-    def value(self, data: dict[str, Any]) -> StateType | datetime:
-        """The sensor's value for a realtime result."""
-        if self.value_fn is not None:
-            return self.value_fn(data)
-        if self.native_unit_of_measurement is not None:
-            return _number(data.get(self.key))
-        return _text(data.get(self.key))
+    value_fn: Callable[[dict[str, Any]], StateType | datetime]
 
 
 def _status(
@@ -168,6 +166,7 @@ def _power(
         native_unit_of_measurement=UnitOfPower.WATT,
         state_class=SensorStateClass.MEASUREMENT,
         entity_registry_enabled_default=enabled,
+        value_fn=_number_of(key),
     )
 
 
@@ -178,14 +177,21 @@ def _energy(key: str, translation_key: str) -> SolaxSensorEntityDescription:
         device_class=SensorDeviceClass.ENERGY,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         state_class=SensorStateClass.TOTAL_INCREASING,
+        value_fn=_number_of(key),
     )
 
 
 # One sensor per field of the realtime response (SolaXCloud User API V1.2,
 # 7.1), except inverterType, plus the computed PV total.
 SENSOR_TYPES: list[SolaxSensorEntityDescription] = [
-    SolaxSensorEntityDescription(key="inverterSN", translation_key="inverter_serial"),
-    SolaxSensorEntityDescription(key="sn", translation_key="pocket_serial"),
+    SolaxSensorEntityDescription(
+        key="inverterSN",
+        translation_key="inverter_serial",
+        value_fn=_text_of("inverterSN"),
+    ),
+    SolaxSensorEntityDescription(
+        key="sn", translation_key="pocket_serial", value_fn=_text_of("sn")
+    ),
     _status("inverterStatus", "inverter_status", INVERTER_STATUS),
     _power("acpower", "ac_power"),
     _energy("yieldtoday", "yield_today"),
@@ -213,12 +219,15 @@ SENSOR_TYPES: list[SolaxSensorEntityDescription] = [
         device_class=SensorDeviceClass.BATTERY,
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
+        value_fn=_number_of("soc"),
     ),
     _status("batStatus", "battery_status", BATTERY_STATUS),
     _power("peps1", "eps_phase1_power"),
     _power("peps2", "eps_phase2_power"),
     _power("peps3", "eps_phase3_power"),
-    SolaxSensorEntityDescription(key="uploadTime", translation_key="upload_time"),
+    SolaxSensorEntityDescription(
+        key="uploadTime", translation_key="upload_time", value_fn=_text_of("uploadTime")
+    ),
     SolaxSensorEntityDescription(
         key="utcDateTime",
         translation_key="utc_date_time",
@@ -229,34 +238,45 @@ SENSOR_TYPES: list[SolaxSensorEntityDescription] = [
 
 
 @dataclass(frozen=True, kw_only=True)
-class BatteryEnergyEntityDescription(SensorEntityDescription):
-    """Energy into (+1) or out of (-1) the battery, added up from batPower."""
+class IntegratedEnergyEntityDescription(SensorEntityDescription):
+    """Energy added up per upload from a power reading in W.
 
+    `direction` 1 counts the power above zero, -1 the power below zero.
+    """
+
+    power_fn: Callable[[dict[str, Any]], int | float | None]
     direction: int
+    device_class: SensorDeviceClass = SensorDeviceClass.ENERGY
+    native_unit_of_measurement: str = UnitOfEnergy.KILO_WATT_HOUR
+    state_class: SensorStateClass = SensorStateClass.TOTAL_INCREASING
+    suggested_display_precision: int = 2
 
 
-BATTERY_ENERGY_TYPES = [
-    BatteryEnergyEntityDescription(
+ENERGY_TYPES = [
+    # batPower is positive while charging.
+    IntegratedEnergyEntityDescription(
         key="battery_charge_energy",
         translation_key="battery_charge_energy",
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        suggested_display_precision=2,
+        power_fn=_number_of("batPower"),
         direction=1,
     ),
-    BatteryEnergyEntityDescription(
+    IntegratedEnergyEntityDescription(
         key="battery_discharge_energy",
         translation_key="battery_discharge_energy",
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        suggested_display_precision=2,
+        power_fn=_number_of("batPower"),
         direction=-1,
+    ),
+    # The API's yield counters are the inverter's AC output, which includes
+    # battery discharge and misses PV stored in the battery.
+    IntegratedEnergyEntityDescription(
+        key="solar_energy",
+        translation_key="solar_energy",
+        power_fn=_pv_total,
+        direction=1,
     ),
 ]
 
-ALL_KEYS = [d.key for d in (*SENSOR_TYPES, *BATTERY_ENERGY_TYPES)]
+ALL_KEYS = [d.key for d in (*SENSOR_TYPES, *ENERGY_TYPES)]
 
 
 async def async_setup_entry(
@@ -275,8 +295,8 @@ async def async_setup_entry(
                 for description in SENSOR_TYPES
             ),
             *(
-                BatteryEnergySensor(entry.unique_id, description, coordinator)
-                for description in BATTERY_ENERGY_TYPES
+                IntegratedEnergySensor(entry.unique_id, description, coordinator)
+                for description in ENERGY_TYPES
             ),
         ]
     )
@@ -314,11 +334,11 @@ class SolaxCloudSensor(SolaxCloudEntity, SensorEntity):
     @property
     def native_value(self) -> StateType | datetime:
         """Return the state of the sensor."""
-        return self.entity_description.value(self.coordinator.data)
+        return self.entity_description.value_fn(self.coordinator.data)
 
 
 @dataclass
-class BatteryEnergyExtraStoredData(SensorExtraStoredData):
+class EnergyExtraStoredData(SensorExtraStoredData):
     """The total plus the last upload it was added up to."""
 
     last_upload: datetime | None
@@ -338,14 +358,14 @@ class BatteryEnergyExtraStoredData(SensorExtraStoredData):
         if (sensor_data := SensorExtraStoredData.from_dict(restored)) is None:
             return None
         last_upload: datetime | None = None
-        last_power = _number(restored.get("last_power"))
         if isinstance(raw := restored.get("last_upload"), str):
             try:
                 last_upload = datetime.fromisoformat(raw)
             except ValueError:
                 last_upload = None
-        if last_upload is None or last_upload.tzinfo is None or last_power is None:
-            last_upload, last_power = None, None
+        if last_upload is not None and last_upload.tzinfo is None:
+            last_upload = None
+        last_power = _number(restored.get("last_power"))
         return cls(
             sensor_data.native_value,
             sensor_data.native_unit_of_measurement,
@@ -354,29 +374,21 @@ class BatteryEnergyExtraStoredData(SensorExtraStoredData):
         )
 
 
-class BatteryEnergySensor(SolaxCloudEntity, RestoreSensor):
-    """Energy charged into or discharged from the battery.
+class IntegratedEnergySensor(SolaxCloudEntity, RestoreSensor):
+    """Energy added up per upload from a power reading (see energy.py)."""
 
-    batPower (positive while charging) is a snapshot per upload. Each pair
-    of consecutive uploads adds the average of the two readings, each
-    limited to this sensor's direction, over the time between them.
-    Repeated polls of one upload, uploads out of order, gaps longer than
-    MAX_UPLOAD_GAP and intervals with a missing reading add nothing.
-    """
-
-    entity_description: BatteryEnergyEntityDescription
+    entity_description: IntegratedEnergyEntityDescription
 
     def __init__(
         self,
         unique_id: str,
-        description: BatteryEnergyEntityDescription,
+        description: IntegratedEnergyEntityDescription,
         coordinator: SolaxCloudCoordinator,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(unique_id, description, coordinator)
         self._total = 0.0
-        self._last_upload: datetime | None = None
-        self._last_power: float | None = None
+        self._series: EnergySeries = EMPTY
 
     @property
     def native_value(self) -> float:
@@ -384,25 +396,26 @@ class BatteryEnergySensor(SolaxCloudEntity, RestoreSensor):
         return self._total
 
     @property
-    def extra_restore_state_data(self) -> BatteryEnergyExtraStoredData:
+    def extra_restore_state_data(self) -> EnergyExtraStoredData:
         """Return what is needed to continue the series after a restart."""
-        return BatteryEnergyExtraStoredData(
+        return EnergyExtraStoredData(
             self._total,
             UnitOfEnergy.KILO_WATT_HOUR,
-            self._last_upload,
-            self._last_power,
+            self._series.last_upload,
+            self._series.last_power,
         )
 
     async def async_added_to_hass(self) -> None:
         """Continue from the stored total and series."""
         await super().async_added_to_hass()
         if (restored := await self.async_get_last_extra_data()) is not None and (
-            stored := BatteryEnergyExtraStoredData.from_dict(restored.as_dict())
+            stored := EnergyExtraStoredData.from_dict(restored.as_dict())
         ) is not None:
             if (total := _number(stored.native_value)) is not None and total >= 0:
                 self._total = float(total)
-            self._last_upload = stored.last_upload
-            self._last_power = stored.last_power
+            self._series = restored_series(
+                stored.last_upload, stored.last_power, dt_util.utcnow()
+            )
         self._add_upload(self.coordinator.data)
 
     @callback
@@ -414,20 +427,11 @@ class BatteryEnergySensor(SolaxCloudEntity, RestoreSensor):
     def _add_upload(self, data: dict[str, Any] | None) -> None:
         if not data or (upload := _upload_instant(data)) is None:
             return
-        if self._last_upload is not None and upload <= self._last_upload:
-            return
-        power = _number(data.get("batPower"))
-        if (
-            power is not None
-            and self._last_power is not None
-            and self._last_upload is not None
-            and upload - self._last_upload <= MAX_UPLOAD_GAP
-        ):
-            direction = self.entity_description.direction
-            average_w = (
-                max(direction * self._last_power, 0) + max(direction * power, 0)
-            ) / 2
-            hours = (upload - self._last_upload).total_seconds() / 3600
-            self._total += average_w * hours / 1000
-        self._last_upload = upload
-        self._last_power = None if power is None else float(power)
+        power = self.entity_description.power_fn(data)
+        self._series, above, below = step(
+            self._series,
+            upload,
+            None if power is None else float(power),
+            dt_util.utcnow(),
+        )
+        self._total += above if self.entity_description.direction > 0 else below

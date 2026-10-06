@@ -2,22 +2,23 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 import itertools
 import math
 import sys
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import aiohttp
-from freezegun.api import FrozenDateTimeFactory
-from hypothesis import HealthCheck, example, given, settings, strategies as st
 import pytest
-
+from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import SOURCE_USER, ConfigEntryState
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.util import dt as dt_util
+from hypothesis import HealthCheck, example, given, settings
+from hypothesis import strategies as st
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.test_util.aiohttp import (
     AiohttpClientMocker,
@@ -29,6 +30,7 @@ from custom_components.solax_cloud.const import (
     CONF_TOKEN,
     DOMAIN,
 )
+from custom_components.solax_cloud.energy import EMPTY, step
 
 from .common import (
     API_ADDRESS,
@@ -385,8 +387,9 @@ async def test_property_padded_serial_is_same_dongle(
     assert aioclient_mock.call_count == 0
 
 
-# Each example starts a day after the previous one, so the battery series
-# restored from the last example never reaches into this one.
+# Each example starts a day after the previous one, and after the setup
+# fixture's upload (2026-10-06), so the series restored from the last example
+# never reaches into this one.
 EXAMPLE_DAYS = itertools.count(1)
 battery_steps = st.lists(
     st.tuples(
@@ -401,43 +404,50 @@ battery_steps = st.lists(
 
 @SHARED_HASS
 @given(steps=battery_steps)
-async def test_property_battery_energy_only_counts_up(
+async def test_property_battery_energy_follows_the_energy_model(
     hass: HomeAssistant,
     config_entry: MockConfigEntry,
     aioclient_mock: AiohttpClientMocker,
     freezer: FrozenDateTimeFactory,
     steps: list[tuple[str, float, float | None]],
 ) -> None:
-    """Battery energy totals never decrease and stay physically plausible.
+    """The battery sensors add exactly what the energy model adds per upload.
 
-    Energy only goes to the side the power points to, and the energy added
-    never exceeds the largest power seen times the time elapsed.
+    The model (energy.py) is checked against numeric integration in
+    test_energy_model.py; this checks the wiring: deduplication of polls,
+    failed polls, direction of each sensor, and that totals only grow.
     """
+    at = datetime(2027, 1, 1, tzinfo=UTC) + timedelta(days=next(EXAMPLE_DAYS))
+    freezer.move_to(at)
     await _fresh_entry(hass, config_entry, aioclient_mock)
     start = (
         float(state(hass, "battery_charge_energy")),
         float(state(hass, "battery_discharge_energy")),
     )
     previous = start
-    at = datetime(2026, 1, 1, tzinfo=UTC) + timedelta(days=next(EXAMPLE_DAYS))
-    first_upload, power = at, None
-    powers: list[float] = []
+    series, expected = EMPTY, [0.0, 0.0]
+    power: float | None = None
 
     for kind, gap_minutes, new_power in steps:
         if kind == "fail":
             respond(aioclient_mock, json=OPERATION_FAILED)
         else:
             if kind == "upload":
-                at += timedelta(minutes=gap_minutes)
+                # utcDateTime carries whole seconds.
+                at = (at + timedelta(minutes=gap_minutes)).replace(microsecond=0)
                 power = new_power
-            if power is not None:
-                powers.append(power)
+            series, above, below = step(series, at, power, at)
+            expected[0] += above
+            expected[1] += below
             respond(
                 aioclient_mock,
                 json=ok_response(
                     batPower=power, utcDateTime=at.strftime("%Y-%m-%dT%H:%M:%SZ")
                 ),
             )
+        # Keep the clock with the uploads (so none looks future-stamped), but
+        # never move it back, or the coordinator's next poll never comes due.
+        freezer.move_to(max(at, dt_util.utcnow()))
         await async_poll(hass, freezer)
         if kind == "fail":
             continue
@@ -448,11 +458,6 @@ async def test_property_battery_energy_only_counts_up(
         assert current[0] >= previous[0] and current[1] >= previous[1]
         previous = current
 
-    charged, discharged = previous[0] - start[0], previous[1] - start[1]
-    if all(p >= 0 for p in powers):
-        assert discharged == pytest.approx(0, abs=1e-12)
-    if all(p <= 0 for p in powers):
-        assert charged == pytest.approx(0, abs=1e-12)
-    largest = max((abs(p) for p in powers), default=0)
-    elapsed_hours = (at - first_upload).total_seconds() / 3600
-    assert charged + discharged <= largest * elapsed_hours / 1000 + 1e-9
+    assert (previous[0] - start[0], previous[1] - start[1]) == pytest.approx(
+        tuple(expected), abs=1e-9
+    )

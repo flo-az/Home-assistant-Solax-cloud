@@ -42,12 +42,19 @@ CHARGE = "battery_charge_energy"
 DISCHARGE = "battery_discharge_energy"
 
 
-def upload(minute: float, power: float | None) -> dict[str, Any]:
-    """A response for an upload `minute` minutes after T0 with this power."""
+def upload(
+    minute: float, power: float | None, pv: float | None = 0.0
+) -> dict[str, Any]:
+    """A response for an upload `minute` minutes after T0.
+
+    `power` is the battery power, `pv` the total PV power (all on MPPT1).
+    """
     at = T0 + timedelta(minutes=minute)
     return {
         "json": ok_response(
             batPower=power,
+            powerdc1=pv,
+            powerdc2=None,
             utcDateTime=at.strftime("%Y-%m-%dT%H:%M:%SZ"),
             uploadTime=at.strftime("%Y-%m-%d %H:%M:%S"),
         )
@@ -67,6 +74,7 @@ async def run(
     responses: list[dict[str, Any]],
 ) -> None:
     """Set up with the first response, then poll once per further response."""
+    freezer.move_to(T0)
     respond(api, **responses[0])
     await async_setup(hass, entry)
     for response in responses[1:]:
@@ -129,22 +137,26 @@ async def test_discharging_is_counted_separately(
     assert totals(hass) == pytest.approx((0.0, 0.1))
 
 
-async def test_interval_is_averaged_from_both_uploads(
+async def test_regression_sign_change_is_split_where_power_crosses_zero(
     hass: HomeAssistant,
     config_entry: MockConfigEntry,
     aioclient_mock: AiohttpClientMocker,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """From 3000 W charging to 1000 W discharging, each side is averaged.
+    """Regression: a sign change counted energy on both sides twice over.
 
-    Charge: (3000 + 0) / 2 W for 5 min = 0.125 kWh.
-    Discharge: (0 + 1000) / 2 W for 5 min = 0.041666... kWh.
+    Averaging each side's clamped readings gave 0.125 kWh charged and
+    0.0417 kWh discharged for 3000 W -> -1000 W over 5 minutes. The line
+    between the readings crosses zero after 3.75 minutes: 3000 W * 3.75 min / 2
+    = 0.09375 kWh charged, 1000 W * 1.25 min / 2 = 0.0104 kWh discharged.
     """
     await run(
         hass, config_entry, aioclient_mock, freezer, [upload(0, 3000), upload(5, -1000)]
     )
 
-    assert totals(hass) == pytest.approx((0.125, 500 * 5 / 60 / 1000))
+    assert totals(hass) == pytest.approx(
+        (3000 * 3.75 / 2 / 60 / 1000, 1000 * 1.25 / 2 / 60 / 1000)
+    )
 
 
 async def test_repeated_polls_of_one_upload_count_once(
@@ -389,3 +401,110 @@ async def test_corrupt_stored_data_is_handled(
     )
 
     assert totals(hass) == pytest.approx(expected)
+
+
+async def test_regression_future_upload_does_not_freeze_battery_energy(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Regression: one upload stamped in the future stopped all counting.
+
+    It became the last upload, every real upload compared as older and was
+    ignored, and the stored series kept it that way across restarts.
+    """
+    await run(
+        hass,
+        config_entry,
+        aioclient_mock,
+        freezer,
+        [
+            upload(0, 3000),
+            upload(60 * 24 * 365 * 73, 3000),
+            upload(5, 3000),
+            upload(10, 3000),
+        ],
+    )
+
+    assert totals(hass) == pytest.approx((0.5, 0.0))
+
+
+async def test_totals_continue_across_reload(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """What the sensors store when unloaded is what they continue from."""
+    await run(
+        hass, config_entry, aioclient_mock, freezer, [upload(0, 3000), upload(5, 3000)]
+    )
+
+    respond(aioclient_mock, **upload(10, 3000))
+    await hass.config_entries.async_reload(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert totals(hass) == pytest.approx((0.5, 0.0))
+
+
+@pytest.mark.parametrize(
+    "series",
+    [
+        {"last_upload": T0.isoformat(), "last_power": "lots"},
+        {"last_upload": (T0 + timedelta(days=365)).isoformat(), "last_power": 3000.0},
+    ],
+    ids=["invalid-power", "upload-in-the-future"],
+)
+async def test_untrustworthy_stored_series_starts_a_new_one(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+    series: dict[str, Any],
+) -> None:
+    """The total is kept, but counting restarts from the next upload."""
+    ids = await _preregister(hass, config_entry)
+    stored = {"native_value": 1.5, "native_unit_of_measurement": "kWh", **series}
+    mock_restore_cache_with_extra_data(
+        hass,
+        [(State(ids[CHARGE], "1.5"), stored), (State(ids[DISCHARGE], "1.5"), stored)],
+    )
+
+    await run(
+        hass, config_entry, aioclient_mock, freezer, [upload(5, 3000), upload(10, 3000)]
+    )
+
+    assert totals(hass) == pytest.approx((1.75, 1.5))
+
+
+async def test_solar_energy_adds_up_pv_power(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Solar energy counts PV input, not the inverter's AC output.
+
+    The API's yield counters are AC output: they include battery discharge
+    and miss PV that went into the battery. 1000 W -> 3000 W over 5 min is
+    2000 W * 5 min = 0.1667 kWh, whatever the battery does meanwhile.
+    """
+    await run(
+        hass,
+        config_entry,
+        aioclient_mock,
+        freezer,
+        [upload(0, 2500, pv=1000), upload(5, -500, pv=3000)],
+    )
+
+    assert float(state(hass, "solar_energy")) == pytest.approx(2000 * 5 / 60 / 1000)
+    attributes = hass.states.get(
+        er.async_get(hass).async_get_entity_id(
+            SENSOR_DOMAIN, DOMAIN, f"{UNIQUE_ID}_test_solar_energy"
+        )
+    ).attributes
+    assert (attributes["device_class"], attributes["state_class"]) == (
+        "energy",
+        "total_increasing",
+    )

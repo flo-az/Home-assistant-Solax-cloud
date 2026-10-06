@@ -11,10 +11,12 @@ from homeassistant.util.json import json_loads
 REALTIME_PATH = "/api/v2/dataAccess/realtimeInfo/get"
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=20)
 
-# success=false codes that mean the token or serial is refused: 103 "token
-# invalid!" (seen live, undocumented), 1001 "Interface Unauthorized" and
-# 1003 "Data Unauthorized" / "no auth!" for a serial outside the account.
-AUTH_ERROR_CODES = frozenset({103, 1001, 1003})
+# success=false codes for a refused token: 103 "token invalid!" (seen live,
+# undocumented) and 1001 "Interface Unauthorized".
+TOKEN_ERROR_CODES = frozenset({103, 1001})
+# 1003 "Data Unauthorized" / "no auth!": the serial is not in the token's
+# account (e.g. the inverter serial instead of the dongle's, or a new dongle).
+SERIAL_ERROR_CODES = frozenset({1003})
 
 
 class SolaxCloudError(Exception):
@@ -27,6 +29,14 @@ class SolaxCloudConnectionError(SolaxCloudError):
 
 class SolaxCloudAuthError(SolaxCloudError):
     """The API refused the token or the serial number."""
+
+
+class SolaxCloudTokenError(SolaxCloudAuthError):
+    """The API refused the token."""
+
+
+class SolaxCloudSerialError(SolaxCloudAuthError):
+    """The serial number is not in the token's account."""
 
 
 class SolaxCloudApiError(SolaxCloudError):
@@ -81,10 +91,14 @@ class SolaxCloudClient:
 
         if not isinstance(body, dict):
             raise SolaxCloudConnectionError(f"Unexpected response: {body!r:.200}")
-        if body.get("success") is True and isinstance(body.get("result"), dict):
-            return body["result"]
+        if body.get("success") is True:
+            if isinstance(body.get("result"), dict):
+                return body["result"]
+            raise SolaxCloudApiError("Solax Cloud has no data for this dongle yet")
 
         code, message = body.get("code"), body.get("exception")
-        if code in AUTH_ERROR_CODES:
-            raise SolaxCloudAuthError(f"{message} (code {code})")
+        if code in TOKEN_ERROR_CODES:
+            raise SolaxCloudTokenError(f"{message} (code {code})")
+        if code in SERIAL_ERROR_CODES:
+            raise SolaxCloudSerialError(f"{message} (code {code})")
         raise SolaxCloudApiError(f"{message} (code {code})")

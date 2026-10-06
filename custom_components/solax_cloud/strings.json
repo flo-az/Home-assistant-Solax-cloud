@@ -17,7 +17,7 @@
       },
       "reauth_confirm": {
         "title": "Solax Cloud token needed",
-        "description": "Solax Cloud refused the token ID for dongle {serial}. Tokens from before the switch to the v2 API may no longer work: copy the current API address and token ID from the API page in Solax Cloud.",
+        "description": "Solax Cloud refused the token ID or the dongle serial number {serial}. Tokens from before the switch to the v2 API may no longer work: copy the current API address and token ID from the API page in Solax Cloud. If the dongle was replaced, remove this integration and add it again with the new serial number.",
         "data": {
           "api_address": "API address",
           "token_id": "Token ID"
@@ -26,8 +26,9 @@
     },
     "error": {
       "cannot_connect": "Failed to connect to Solax Cloud. Check your network and try again.",
-      "invalid_token_or_serial": "Solax Cloud rejected this token ID and serial number.",
-      "api_error": "Solax Cloud could not process the request. Try again later."
+      "invalid_token": "Solax Cloud rejected this token ID. Copy the current one from the API page.",
+      "serial_not_in_account": "This dongle serial number is not in the account of this token ID. Use the dongle's registration number, not the inverter serial.",
+      "api_error": "Solax Cloud could not process the request or has no data for this dongle yet. Try again later."
     },
     "abort": {
       "already_configured": "This dongle is already configured.",
@@ -158,6 +159,9 @@
       },
       "battery_discharge_energy": {
         "name": "Battery discharge energy"
+      },
+      "solar_energy": {
+        "name": "Solar energy"
       }
     }
   }
