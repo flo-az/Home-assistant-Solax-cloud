@@ -21,6 +21,7 @@ from .api import (
     SolaxCloudConnectionError,
     SolaxCloudSerialError,
     SolaxCloudTokenError,
+    is_secure,
     normalize_api_address,
 )
 from .const import (
@@ -58,7 +59,7 @@ class SolaxCloudConfigFlow(ConfigFlow, domain=DOMAIN):
         self, api_address: str, token: str, serial: str
     ) -> dict[str, str]:
         """Try the credentials against the API; return form errors."""
-        if not api_address.startswith("https://"):
+        if not is_secure(api_address):
             # Plain http would send the token unencrypted.
             return {"base": "insecure_address"}
         client = SolaxCloudClient(
@@ -153,10 +154,20 @@ class SolaxCloudConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             api_address = normalize_api_address(user_input[CONF_API_ADDRESS])
-            token = (user_input.get(CONF_TOKEN) or entry.data[CONF_TOKEN]).strip()
-            errors = await self._async_validate(
-                api_address, token, entry.data[CONF_SERIAL]
+            stored_address = normalize_api_address(
+                entry.data.get(CONF_API_ADDRESS, DEFAULT_API_ADDRESS)
             )
+            entered_token = (user_input.get(CONF_TOKEN) or "").strip()
+            if not entered_token and api_address != stored_address:
+                # Do not hand the stored token to a different host unasked.
+                errors = {"base": "token_required"}
+            else:
+                errors = await self._async_validate(
+                    api_address,
+                    entered_token or entry.data[CONF_TOKEN],
+                    entry.data[CONF_SERIAL],
+                )
+            token = entered_token or entry.data[CONF_TOKEN]
             if not errors:
                 return self.async_update_reload_and_abort(
                     entry,

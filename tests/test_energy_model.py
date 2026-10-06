@@ -99,7 +99,7 @@ def test_upload_slightly_ahead_of_our_clock_counts() -> None:
     ("last_upload", "last_power", "usable"),
     [
         (T0, 3000.0, True),
-        (NOW + MAX_CLOCK_SKEW + timedelta(seconds=1), 3000.0, False),
+        (NOW + timedelta(hours=2), 3000.0, False),
         (T0, None, False),
         (None, 3000.0, False),
     ],

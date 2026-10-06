@@ -41,7 +41,8 @@
       "invalid_token": "Solax Cloud hat diese Token-ID abgelehnt. Kopiere die aktuelle von der API-Seite.",
       "serial_not_in_account": "Diese Seriennummer gehört nicht zum Konto dieser Token-ID. Verwende die Registriernummer des Dongles, nicht die Seriennummer des Wechselrichters.",
       "api_error": "Solax Cloud konnte die Anfrage nicht verarbeiten oder hat noch keine Daten für diesen Dongle. Versuche es später erneut.",
-      "insecure_address": "Die API-Adresse muss mit https:// beginnen; über http würde der Token unverschlüsselt gesendet."
+      "insecure_address": "Die API-Adresse muss mit https:// beginnen; über http würde der Token unverschlüsselt gesendet.",
+      "token_required": "Gib die Token-ID erneut ein, wenn du die API-Adresse änderst."
     },
     "abort": {
       "already_configured": "Dieser Dongle ist bereits eingerichtet.",
@@ -191,6 +192,9 @@
     },
     "serial_not_in_account": {
       "message": "Dongle {serial} gehört nicht zum Konto dieser Token-ID; wurde der Dongle getauscht, füge die Integration erneut hinzu: {error}"
+    },
+    "insecure_address": {
+      "message": "Die API-Adresse ist nicht https; der Token würde unverschlüsselt gesendet. Konfiguriere die Integration mit einer https-Adresse neu."
     }
   },
   "issues": {

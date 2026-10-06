@@ -187,3 +187,24 @@ async def test_every_status_state_has_text(
         prefix = f"component.{DOMAIN}.entity.sensor.{entry.translation_key}.state"
         missing += [o for o in options if not strings.get(f"{prefix}.{o}")]
     assert missing == []
+
+
+async def test_reconfigure_and_setup_refusals_have_text(
+    hass: HomeAssistant, config_entry: MockConfigEntry
+) -> None:
+    """The token-required error and the insecure-address reason are translated."""
+    flow = await config_entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        flow["flow_id"], {CONF_API_ADDRESS: "https://other.example.com"}
+    )
+    error = result["errors"]["base"]
+
+    for language in ("en", "de"):
+        config = await async_get_translations(hass, language, "config", {DOMAIN})
+        exceptions = await async_get_translations(
+            hass, language, "exceptions", {DOMAIN}
+        )
+        assert config.get(f"{PREFIX}.error.{error}"), language
+        assert exceptions.get(
+            f"component.{DOMAIN}.exceptions.insecure_address.message"
+        ), language

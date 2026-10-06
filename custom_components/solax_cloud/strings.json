@@ -41,7 +41,8 @@
       "invalid_token": "Solax Cloud rejected this token ID. Copy the current one from the API page.",
       "serial_not_in_account": "This dongle serial number is not in the account of this token ID. Use the dongle's registration number, not the inverter serial.",
       "api_error": "Solax Cloud could not process the request or has no data for this dongle yet. Try again later.",
-      "insecure_address": "The API address must start with https://; plain http would send the token unencrypted."
+      "insecure_address": "The API address must start with https://; plain http would send the token unencrypted.",
+      "token_required": "Enter the token ID again when changing to a different API address."
     },
     "abort": {
       "already_configured": "This dongle is already configured.",
@@ -191,6 +192,9 @@
     },
     "serial_not_in_account": {
       "message": "Dongle {serial} is not in the account of this token ID; if the dongle was replaced, add the integration again: {error}"
+    },
+    "insecure_address": {
+      "message": "The API address is not https; the token would be sent unencrypted. Reconfigure the integration with an https address."
     }
   },
   "issues": {

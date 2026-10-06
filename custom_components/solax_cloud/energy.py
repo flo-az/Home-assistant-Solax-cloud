@@ -18,6 +18,7 @@ MAX_UPLOAD_GAP = timedelta(minutes=15)
 # as the series' last upload would make every real upload look older. Wide,
 # because the cloud's clock and ours may differ by hours.
 MAX_CLOCK_SKEW = timedelta(days=1)
+RESTORED_CLOCK_SKEW = timedelta(hours=1)
 
 
 @dataclass(frozen=True)
@@ -34,8 +35,16 @@ EMPTY = EnergySeries(None, None)
 def restored_series(
     last_upload: datetime | None, last_power: float | None, now: datetime
 ) -> EnergySeries:
-    """A stored series, if complete and not from the future; else a new one."""
-    if last_upload is None or last_power is None or last_upload > now + MAX_CLOCK_SKEW:
+    """A stored series, if complete and not from the future; else a new one.
+
+    Stricter than for live uploads: a stored upload far ahead of our clock
+    would block counting after every restart until that time.
+    """
+    if (
+        last_upload is None
+        or last_power is None
+        or last_upload > now + RESTORED_CLOCK_SKEW
+    ):
         return EMPTY
     return EnergySeries(last_upload, last_power)
 

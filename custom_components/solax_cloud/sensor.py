@@ -30,7 +30,7 @@ from homeassistant.util import dt as dt_util
 from .coordinator import SolaxCloudConfigEntry, SolaxCloudCoordinator
 from .entity import SolaxCloudEntity
 from .energy import EMPTY, EnergySeries, restored_series, step
-from .polling import upload_instant
+from .polling import Seen, upload_instant
 
 # All sensors read the coordinator's data; none sends requests itself.
 PARALLEL_UPDATES = 0
@@ -405,6 +405,9 @@ class IntegratedEnergySensor(SolaxCloudEntity, RestoreSensor):
     def _add_upload(self, data: dict[str, Any] | None) -> None:
         if not data or (upload := upload_instant(data)) is None:
             return
+        if self.coordinator.last_seen is Seen.RESET:
+            # The cloud's clock was corrected: start a new series here.
+            self._series = EMPTY
         power = self.entity_description.power_fn(data)
         self._series, above, below = step(
             self._series,

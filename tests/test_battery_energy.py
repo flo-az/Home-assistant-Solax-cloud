@@ -508,3 +508,33 @@ async def test_solar_energy_adds_up_pv_power(
         "energy",
         "total_increasing",
     )
+
+
+async def test_regression_cloud_clock_correction_does_not_stop_energy(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Regression: one stamp 12 h ahead stopped the energy count for 12 h.
+
+    Every real upload after it compared as older. Once the tracker adopts the
+    corrected clock (three advancing older stamps), counting resumes: only
+    the interval 15 -> 20 min counts, 3000 W for 5 min = 0.25 kWh.
+    """
+    await run(
+        hass,
+        config_entry,
+        aioclient_mock,
+        freezer,
+        [
+            upload(0, 3000),
+            upload(12 * 60, 3000),
+            upload(5, 3000),
+            upload(10, 3000),
+            upload(15, 3000),
+            upload(20, 3000),
+        ],
+    )
+
+    assert totals(hass) == pytest.approx((0.25, 0.0))

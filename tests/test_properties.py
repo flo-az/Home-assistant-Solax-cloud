@@ -281,6 +281,9 @@ async def test_property_sensors_follow_every_poll(
 )
 # Longer than the 255 characters a Home Assistant state may hold.
 @example(body={"success": True, "result": {"sn": "S" * 300}})
+# A refusal whose code cannot be looked up (found as a rare failure).
+@example(body={"success": False, "code": []})
+@example(body={"success": False, "code": {}})
 # A "never" sentinel at the end of the date range must not overflow...
 @example(body={"success": True, "result": {"utcDateTime": "9999-12-31T23:59:59Z"}})
 # ...nor one at the start whose offset puts it before year 1 in UTC.

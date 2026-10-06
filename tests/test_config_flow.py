@@ -310,21 +310,17 @@ async def test_reconfigure_keeps_settings_on_failure(
 
 
 @pytest.mark.usefixtures("mock_setup_entry")
-async def test_reconfigure_address_only_keeps_the_token(
+async def test_reconfigure_without_token_keeps_it(
     hass: HomeAssistant,
     config_entry: MockConfigEntry,
     aioclient_mock: AiohttpClientMocker,
 ) -> None:
-    """Changing only the API address does not require retyping the token."""
-    respond(
-        aioclient_mock,
-        url=f"https://euapi.solaxcloud.com{API_PATH}",
-        json=ok_response(),
-    )
+    """Re-entering the same address (in any spelling) needs no token."""
+    respond(aioclient_mock, json=ok_response())
     flow = await config_entry.start_reconfigure_flow(hass)
 
     result = await hass.config_entries.flow.async_configure(
-        flow["flow_id"], {CONF_API_ADDRESS: "https://euapi.solaxcloud.com"}
+        flow["flow_id"], {CONF_API_ADDRESS: "HTTPS://global.solaxcloud.com/"}
     )
 
     assert result["reason"] == "reconfigure_successful"
@@ -355,4 +351,49 @@ async def test_plain_http_address_is_refused(
         )
 
     assert result["errors"] == {"base": "insecure_address"}
+    assert aioclient_mock.call_count == 0
+
+
+@pytest.mark.parametrize("code", [[], {}], ids=["list", "object"])
+async def test_regression_refusal_with_odd_code_shows_api_error(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, code: Any
+) -> None:
+    """Regression: such a refusal crashed the setup dialog."""
+    respond(aioclient_mock, json={"success": False, "code": code})
+
+    result = await _submit(hass, await _start(hass), USER_INPUT)
+
+    assert result["errors"] == {"base": "api_error"}
+
+
+@pytest.mark.usefixtures("mock_setup_entry")
+async def test_uppercase_https_is_accepted(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """HTTPS:// is https; the stored address is normalized to lowercase scheme."""
+    respond(aioclient_mock, json=ok_response())
+
+    result = await _submit(
+        hass,
+        await _start(hass),
+        {**USER_INPUT, CONF_API_ADDRESS: "HTTPS://global.solaxcloud.com"},
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_API_ADDRESS] == API_ADDRESS
+
+
+async def test_reconfigure_to_another_host_needs_the_token(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """The stored token is not sent to a different host without asking."""
+    flow = await config_entry.start_reconfigure_flow(hass)
+
+    result = await hass.config_entries.flow.async_configure(
+        flow["flow_id"], {CONF_API_ADDRESS: "https://other.example.com"}
+    )
+
+    assert result["errors"] == {"base": "token_required"}
     assert aioclient_mock.call_count == 0

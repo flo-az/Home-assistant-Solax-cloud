@@ -16,7 +16,12 @@ from pytest_homeassistant_custom_component.test_util.aiohttp import (
     AiohttpClientMocker,
 )
 
-from custom_components.solax_cloud.const import CONF_SERIAL, CONF_TOKEN, DOMAIN
+from custom_components.solax_cloud.const import (
+    CONF_API_ADDRESS,
+    CONF_SERIAL,
+    CONF_TOKEN,
+    DOMAIN,
+)
 
 from .common import (
     API_URL,
@@ -168,3 +173,48 @@ async def test_unload(
 
     assert config_entry.state is ConfigEntryState.NOT_LOADED
     assert state(hass, "acpower") == "unavailable"
+
+
+@pytest.mark.parametrize("code", [[], {}, "103", 103.5, True], ids=repr)
+async def test_regression_refusal_with_odd_code_is_an_ordinary_error(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    caplog: pytest.LogCaptureFixture,
+    code: Any,
+) -> None:
+    """Regression: a refusal whose code was a list or object raised TypeError.
+
+    The code was looked up in a frozenset, which needs a hashable value; the
+    error escaped as "Unexpected error fetching solax_cloud data". Found as
+    a rare property test failure.
+    """
+    respond(aioclient_mock, json={"success": False, "code": code})
+
+    await async_setup(hass, config_entry)
+
+    assert config_entry.state is ConfigEntryState.SETUP_RETRY
+    assert "Unexpected error" not in caplog.text
+
+
+async def test_stored_plain_http_address_is_refused(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """An entry stored with http:// never sends the token unencrypted."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=SERIAL,
+        unique_id=UNIQUE_ID,
+        data={
+            CONF_API_ADDRESS: "http://global.solaxcloud.com",
+            CONF_TOKEN: TOKEN,
+            CONF_SERIAL: SERIAL,
+        },
+    )
+    entry.add_to_hass(hass)
+
+    await async_setup(hass, entry)
+
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert entry.error_reason_translation_key == "insecure_address"
+    assert aioclient_mock.call_count == 0

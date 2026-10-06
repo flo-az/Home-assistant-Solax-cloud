@@ -129,11 +129,12 @@ async def test_backs_off_once_the_dongle_goes_quiet(
     requests = cloud(aioclient_mock, last=FIRST_UPLOAD)
     await async_setup(hass, config_entry)
 
-    await time_passes(hass, freezer, 21 * MIN)
+    # Close polling for one maximal cadence (15 min), then every 5 minutes.
+    await time_passes(hass, freezer, 16 * MIN)
     early = len(requests)
     await time_passes(hass, freezer, 30 * MIN)
 
-    assert early <= 45
+    assert early <= 34
     assert len(requests) - early <= 7
 
 
@@ -162,7 +163,7 @@ async def test_failed_poll_is_retried_slowly_once_the_dongle_is_quiet(
     """A dead cloud and a quiet dongle: one try every 5 minutes, not every minute."""
     cloud(aioclient_mock, last=FIRST_UPLOAD)
     await async_setup(hass, config_entry)
-    await time_passes(hass, freezer, 25 * MIN)
+    await time_passes(hass, freezer, 40 * MIN)  # stale by now
     respond(aioclient_mock, json=OPERATION_FAILED)
 
     await time_passes(hass, freezer, 20 * MIN)
@@ -178,13 +179,15 @@ async def test_live_readings_go_unavailable_when_uploads_stop(
 ) -> None:
     """The cloud keeps answering with the last upload: after 20 minutes without
     a new one, live readings are unavailable; totals and upload time stay."""
-    cloud(aioclient_mock, last=FIRST_UPLOAD)
+    last = FIRST_UPLOAD + 30 * MIN
+    cloud(aioclient_mock, last=last)
     await async_setup(hass, config_entry)
+    await time_passes(hass, freezer, last - dt_util.utcnow() + MIN)  # learned
 
-    await time_passes(hass, freezer, 19 * MIN)
+    await time_passes(hass, freezer, 18 * MIN)
     assert live_available(hass) == dict.fromkeys(LIVE_KEYS, True)
 
-    await time_passes(hass, freezer, 6 * MIN)
+    await time_passes(hass, freezer, 4 * MIN)
     assert live_available(hass) == dict.fromkeys(LIVE_KEYS, False)
     assert {k: state(hass, k) != STATE_UNAVAILABLE for k in KEPT_KEYS} == dict.fromkeys(
         KEPT_KEYS, True
@@ -193,8 +196,8 @@ async def test_live_readings_go_unavailable_when_uploads_stop(
 
 @pytest.mark.parametrize(
     ("age", "live"),
-    [(timedelta(minutes=50), True), (timedelta(hours=2), False)],
-    ids=["recent-by-our-clock", "hours-old"],
+    [(timedelta(hours=2), True), (timedelta(hours=4), False)],
+    ids=["within-clock-tolerance", "hours-old"],
 )
 async def test_first_upload_after_start(
     hass: HomeAssistant,
@@ -203,7 +206,7 @@ async def test_first_upload_after_start(
     age: timedelta,
     live: bool,
 ) -> None:
-    """Clocks may differ: up to an hour old is trusted at start, hours are not."""
+    """Clocks may differ by hours: up to 3 h old is trusted at start."""
     respond(aioclient_mock, json=ok_response(utcDateTime=stamp(dt_util.utcnow() - age)))
 
     await async_setup(hass, config_entry)

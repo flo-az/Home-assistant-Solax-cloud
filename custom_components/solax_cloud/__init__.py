@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import SolaxCloudClient
+from .api import SolaxCloudClient, is_secure
 from .const import (
     CONF_API_ADDRESS,
     CONF_SERIAL,
@@ -24,9 +25,15 @@ PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 async def async_setup_entry(hass: HomeAssistant, entry: SolaxCloudConfigEntry) -> bool:
     """Set up Solax Cloud from a config entry."""
+    api_address = entry.data.get(CONF_API_ADDRESS, DEFAULT_API_ADDRESS)
+    if not is_secure(api_address):
+        # Never send the token unencrypted; the user has to reconfigure.
+        raise ConfigEntryError(
+            translation_domain=DOMAIN, translation_key="insecure_address"
+        )
     client = SolaxCloudClient(
         async_get_clientsession(hass),
-        entry.data.get(CONF_API_ADDRESS, DEFAULT_API_ADDRESS),
+        api_address,
         entry.data[CONF_TOKEN],
         entry.data[CONF_SERIAL],
     )

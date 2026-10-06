@@ -47,8 +47,14 @@ def normalize_api_address(address: str) -> str:
     """Turn an API address as pasted from Solax Cloud into a base URL."""
     address = address.strip().rstrip("/")
     if "://" not in address:
-        address = f"https://{address}"
-    return address
+        return f"https://{address}"
+    scheme, rest = address.split("://", 1)
+    return f"{scheme.lower()}://{rest}"
+
+
+def is_secure(api_address: str) -> bool:
+    """Whether requests to this address are encrypted (the token travels along)."""
+    return normalize_api_address(api_address).startswith("https://")
 
 
 class SolaxCloudClient:
@@ -95,6 +101,10 @@ class SolaxCloudClient:
             raise SolaxCloudApiError("Solax Cloud has no data for this dongle yet")
 
         code, message = body.get("code"), body.get("exception")
+        if not isinstance(code, int) or isinstance(code, bool):
+            # Only whole numbers are codes (and lists or objects cannot even
+            # be looked up in the sets below).
+            raise SolaxCloudApiError(f"{message!s:.200} (code {code!r:.50})")
         if code in TOKEN_ERROR_CODES:
             raise SolaxCloudTokenError(f"{message} (code {code})")
         if code in SERIAL_ERROR_CODES:

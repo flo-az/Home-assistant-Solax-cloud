@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -33,6 +33,9 @@ from .polling import (
 )
 
 type SolaxCloudConfigEntry = ConfigEntry[SolaxCloudCoordinator]
+
+# Origin for expressing the monotonic clock as datetimes (arbitrary).
+MONOTONIC_EPOCH = datetime(2000, 1, 1, tzinfo=UTC)
 
 # Tell the user once no new upload has been seen for this long. Shorter
 # would flag PV-only dongles that lose power every night.
@@ -68,12 +71,18 @@ class SolaxCloudCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             always_update=True,
         )
         self.client = client
-        self.tracker = UploadTracker.start(dt_util.utcnow())
+        self.tracker = UploadTracker.start(self._monotonic())
+        # How the latest poll's upload compared with what we had.
+        self.last_seen = Seen.NONE
+
+    def _monotonic(self) -> datetime:
+        """The event loop's monotonic clock, which never jumps, as a datetime."""
+        return MONOTONIC_EPOCH + timedelta(seconds=self.hass.loop.time())
 
     @property
     def stale(self) -> bool:
         """Whether no new upload has been seen for too long."""
-        return is_stale(self.tracker, dt_util.utcnow())
+        return is_stale(self.tracker, self._monotonic())
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from solax API."""
@@ -111,8 +120,11 @@ class SolaxCloudCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 translation_placeholders={"error": str(err)},
             ) from err
 
-        now = dt_util.utcnow()
-        self.tracker, seen = observe(self.tracker, upload_instant(data), now)
+        now = self._monotonic()
+        self.tracker, seen = observe(
+            self.tracker, upload_instant(data), now, dt_util.utcnow()
+        )
+        self.last_seen = seen
         self.update_interval = next_poll(self.tracker, now)
         self._update_offline_issue(now)
         if seen is Seen.OLDER and self.data is not None:
@@ -127,8 +139,12 @@ class SolaxCloudCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.update_interval = OFFLINE_POLL if self.stale else OVERDUE_POLL
 
     def _update_offline_issue(self, now: datetime) -> None:
-        seen_at = self.tracker.seen_at
-        if seen_at is not None and now - seen_at > OFFLINE_ISSUE_AFTER:
+        seen_at, newest = self.tracker.seen_at, self.tracker.newest
+        if (
+            seen_at is not None
+            and newest is not None
+            and now - seen_at > OFFLINE_ISSUE_AFTER
+        ):
             ir.async_create_issue(
                 self.hass,
                 DOMAIN,
@@ -136,7 +152,8 @@ class SolaxCloudCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 is_fixable=False,
                 severity=ir.IssueSeverity.WARNING,
                 translation_key="dongle_offline",
-                translation_placeholders={"last_upload": _format_time(seen_at)},
+                # The last upload as stamped by Solax Cloud.
+                translation_placeholders={"last_upload": _format_time(newest)},
             )
         else:
             self.async_clear_offline_issue()
