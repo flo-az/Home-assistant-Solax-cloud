@@ -4,9 +4,30 @@ Reads your SolaX inverter's live data from Solax Cloud (realtime API v2) into
 Home Assistant, including solar, battery charge and battery discharge energy
 for the energy dashboard.
 
+## How data is updated
+
 The data comes from the cloud, so it updates as often as your Pocket WiFi/LAN
-dongle uploads (typically every 5 minutes). The integration polls every
-minute and ignores repeated readings of the same upload.
+dongle uploads (every 5 minutes on known installs). The integration learns
+that rhythm and asks Solax Cloud once per upload, about 30 seconds after it
+is due: new readings show up within a minute, at one API call per upload.
+
+- If an upload is late, it checks every minute; after 20 minutes without an
+  upload it backs off to every 5 minutes.
+- A failed request is retried after a minute.
+- Readings of the moment (power, state of charge, status) become
+  *unavailable* once the latest upload is more than 20 minutes old, so a
+  dongle that stopped sending is not shown as current. Totals, serials and
+  the upload time stay.
+- After 3 hours without an upload, *Settings → Repairs* shows a notice. It
+  disappears by itself once data arrives.
+
+## Supported devices
+
+Any SolaX inverter whose dongle reports to Solax Cloud and appears on the
+cloud's API page. Tested with an X3-Hybrid-G4 behind a Pocket LAN 3.0
+dongle. Which values are filled depends on the inverter: an inverter
+without battery, EPS or a third MPPT reports those as empty, and their
+sensors stay *unknown*.
 
 ## Installation
 
@@ -27,10 +48,15 @@ page). You need:
 | Token ID | Shown on the API page |
 | Dongle serial number | Registration number of the Pocket WiFi/LAN dongle, **not** the inverter serial (Solax Cloud lists it under *Devices*, type *Dongle*) |
 
-If Solax Cloud later refuses the token (for example after you regenerate it,
-or a token from before the v2 API), Home Assistant asks for a new one under
+To change the API address or token later, open the integration under
+*Settings → Devices & services* and choose *Reconfigure*.
+
+If Solax Cloud refuses the token (for example after you regenerate it, or a
+token from before the v2 API), Home Assistant asks for a new one under
 *Settings → Devices & services*. If you replace the dongle, remove the
 integration and add it again with the new dongle's serial number.
+
+The integration is translated into English and German.
 
 ## Sensors
 
@@ -98,12 +124,77 @@ configured: the yield counters already contain battery discharge, so the
 dashboard would count the battery twice and show home consumption too low
 while charging and too high afterwards.
 
+## Automation examples
+
+Notify when the battery is full:
+
+```yaml
+automation:
+  - alias: "Battery full"
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.pv_state_of_charge  # your entity id
+        above: 99
+    actions:
+      - action: notify.notify
+        data:
+          message: "The home battery is full."
+```
+
+Notify when the inverter reports a fault:
+
+```yaml
+automation:
+  - alias: "Inverter fault"
+    triggers:
+      - trigger: state
+        entity_id: sensor.pv_inverter_status  # your entity id
+        to:
+          - recoverable_fault
+          - permanent_fault
+    actions:
+      - action: notify.notify
+        data:
+          message: "The inverter reports {{ states('sensor.pv_inverter_status') }}."
+```
+
+## Known limitations
+
+- Data is as fresh as the dongle's uploads (about every 5 minutes); this
+  is a cloud API, not a local connection.
+- The API offers no energy counters for the battery or solar production;
+  the energy sensors are computed estimates (see above).
+- Read-only: settings of the inverter (work mode, charge times) cannot be
+  changed.
+- *Inverter type* is not exposed, because the API's type codes are not
+  documented.
+
+## Troubleshooting
+
+- **"Dongle serial number is not in the account"**: use the dongle's
+  registration number (Solax Cloud lists it under *Devices*, type *Dongle*),
+  not the inverter serial.
+- **"Solax Cloud rejected this token ID"**: copy the current token from the
+  API page; regenerating it there invalidates the old one.
+- **All live sensors unavailable, upload time old**: the dongle is not
+  uploading. Check its power and network; the Solax app shows the same
+  missing data.
+- For bug reports, attach the integration's diagnostics (*Settings →
+  Devices & services → Solax Cloud → ⋮ → Download diagnostics*); token and
+  serial numbers are removed from it.
+
+## Removal
+
+1. *Settings → Devices & services → Solax Cloud → ⋮ → Delete*.
+2. Remove the repository in HACS (*⋮ → Remove*) and restart Home Assistant.
+
 ## Development
 
 ```sh
 python3.14 -m venv .venv
 .venv/bin/pip install -r requirements_test.txt
 .venv/bin/pytest
+.venv/bin/mypy --strict --follow-imports=silent custom_components/solax_cloud
 ```
 
 The tests use [pytest-homeassistant-custom-component](https://github.com/MatthewFlamm/pytest-homeassistant-custom-component)
