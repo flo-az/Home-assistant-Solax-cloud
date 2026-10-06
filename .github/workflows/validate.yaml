@@ -16,6 +16,8 @@ jobs:
         uses: "hacs/action@main"
         with:
           category: "integration"
+          # SolaX's logo is theirs to publish; HACS falls back to a default.
+          ignore: "brands"
 
   hassfest:
     runs-on: "ubuntu-latest"
