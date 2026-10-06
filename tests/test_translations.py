@@ -10,12 +10,20 @@ import requests_mock as rm
 
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.translation import async_get_translations
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.solax_cloud.const import CONF_SERIAL, CONF_TOKEN, DOMAIN
 
-from .common import API_URL, REJECTED_RESPONSE, SERIAL, TOKEN
+from .common import (
+    API_URL,
+    REJECTED_RESPONSE,
+    SERIAL,
+    TOKEN,
+    async_setup,
+    entity_id,
+)
 
 INTEGRATION_DIR = Path(__file__).parents[1] / "custom_components" / DOMAIN
 PREFIX = f"component.{DOMAIN}.config"
@@ -101,3 +109,20 @@ def test_strings_json_matches_english_translation() -> None:
     english = json.loads((INTEGRATION_DIR / "translations" / "en.json").read_text())
 
     assert strings == english
+
+
+async def test_every_status_state_has_text(
+    hass: HomeAssistant, config_entry: MockConfigEntry, solax_api: rm.Mocker
+) -> None:
+    """Each state a status sensor can take has an English name."""
+    await async_setup(hass, config_entry)
+    strings = await async_get_translations(hass, "en", "entity", {DOMAIN})
+
+    missing = []
+    for key in ("inverterStatus", "batStatus"):
+        entry = er.async_get(hass).async_get(entity_id(hass, key))
+        options = hass.states.get(entry.entity_id).attributes["options"]
+        assert options
+        prefix = f"component.{DOMAIN}.entity.sensor.{entry.translation_key}.state"
+        missing += [o for o in options if not strings.get(f"{prefix}.{o}")]
+    assert missing == []

@@ -124,3 +124,37 @@ async def test_regression_utc_date_time_is_upload_instant(
     await async_setup(hass, config_entry)
 
     assert state(hass, "utcDateTime") == expected
+
+
+@pytest.mark.parametrize(
+    ("key", "code", "expected"),
+    [
+        # SolaXCloud User API V1.2, 8.1 "Device Status Mapping" and batStatus.
+        ("inverterStatus", "100", "waiting"),
+        ("inverterStatus", "102", "normal"),
+        ("inverterStatus", "107", "off_grid"),
+        ("inverterStatus", "109", "sleep"),
+        ("inverterStatus", "148", "normal_ss"),
+        ("inverterStatus", "160", "openadr"),
+        ("inverterStatus", "999", STATE_UNKNOWN),
+        ("inverterStatus", None, STATE_UNKNOWN),
+        ("batStatus", "0", "normal"),
+        ("batStatus", "1", "fault"),
+        ("batStatus", "2", "disconnected"),
+        ("batStatus", None, STATE_UNKNOWN),
+    ],
+)
+async def test_status_codes_map_to_states(
+    hass: HomeAssistant,
+    config_entry: MockConfigEntry,
+    requests_mock: rm.Mocker,
+    key: str,
+    code: str | None,
+    expected: str,
+) -> None:
+    """Status codes become named states; undocumented codes are unknown."""
+    requests_mock.get(API_URL, json=ok_response(**{key: code}))
+
+    await async_setup(hass, config_entry)
+
+    assert state(hass, key) == expected

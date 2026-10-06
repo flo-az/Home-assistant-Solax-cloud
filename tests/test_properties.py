@@ -28,6 +28,7 @@ from .common import (
     TOKEN,
     async_poll,
     async_setup,
+    entity_id,
     ok_response,
     state,
 )
@@ -62,7 +63,26 @@ COORDINATOR_FAILURE_REPORTS = (
     "Error requesting solax_cloud data",
     "Error fetching solax_cloud data",
 )
-SENSOR_KEYS = [*NUMERIC_KEYS, "total_solar_power", "sn", "uploadTime", "utcDateTime"]
+STATUS_KEYS = ["inverterStatus", "batStatus"]
+SENSOR_KEYS = [
+    *NUMERIC_KEYS,
+    *STATUS_KEYS,
+    "total_solar_power",
+    "inverterSN",
+    "sn",
+    "uploadTime",
+    "utcDateTime",
+]
+# Documented codes and their states (SolaXCloud User API V1.2, 7.1 and 8.1).
+KNOWN_STATUS = {
+    "inverterStatus": {"100": "waiting", "102": "normal", "109": "sleep"},
+    "batStatus": {"0": "normal", "1": "fault", "2": "disconnected"},
+}
+status_codes = st.one_of(
+    st.none(),
+    st.sampled_from(["0", "1", "2", "100", "102", "109"]),
+    st.text(max_size=6),
+)
 
 readings = st.one_of(
     st.none(),
@@ -84,7 +104,9 @@ def results(draw: st.DrawFn) -> dict[str, Any]:
     return {
         **{key: draw(readings) for key in [*NUMERIC_KEYS, "powerdc3", "powerdc4"]},
         "feedinpowerM2": draw(readings),
+        "inverterSN": draw(st.from_regex(r"[A-Z0-9]{14}", fullmatch=True)),
         "sn": draw(st.from_regex(r"[A-Z0-9]{10}", fullmatch=True)),
+        **{key: draw(status_codes) for key in STATUS_KEYS},
         "uploadTime": draw(
             st.none() | any_datetime.map(lambda d: d.strftime("%Y-%m-%d %H:%M:%S"))
         ),
@@ -158,6 +180,14 @@ async def test_property_sensors_follow_every_poll(
         assert float(state(hass, "total_solar_power")) == pytest.approx(
             pv_total, rel=1e-14
         )
+        for key in STATUS_KEYS:
+            shown = state(hass, key)
+            if result[key] in KNOWN_STATUS[key]:
+                assert shown == KNOWN_STATUS[key][result[key]], key
+            else:
+                options = hass.states.get(entity_id(hass, key)).attributes["options"]
+                assert shown in [*options, STATE_UNKNOWN], (key, result[key])
+        assert state(hass, "inverterSN") == result["inverterSN"]
         assert state(hass, "sn") == result["sn"]
         assert state(hass, "uploadTime") == (result["uploadTime"] or STATE_UNKNOWN)
         timestamp = state(hass, "utcDateTime")

@@ -15,6 +15,7 @@ from homeassistant.const import PERCENTAGE, UnitOfPower, UnitOfEnergy
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
@@ -38,6 +39,11 @@ async def async_setup_entry(
     )
 
 
+def sensor_unique_id(entry_unique_id: str, key: str) -> str:
+    """Unique id of the sensor for an API field (kept from early versions)."""
+    return f"{entry_unique_id}_test_{key}"
+
+
 class SolaxCloudSensor(CoordinatorEntity[solaxcloudCoordinator], SensorEntity):
     """Representation of a Solax cloud sensor."""
 
@@ -50,15 +56,19 @@ class SolaxCloudSensor(CoordinatorEntity[solaxcloudCoordinator], SensorEntity):
         """Initialize the sensor."""
         super().__init__(coordinator)
         self.entity_description = description
-        self._attr_unique_id = f"{unique_id}_test_{description.key}"
+        self._attr_unique_id = sensor_unique_id(unique_id, description.key)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, unique_id)},
             entry_type=DeviceEntryType.SERVICE,
         )
 
     @property
-    def native_value(self) -> datetime | None:
+    def native_value(self) -> StateType | datetime:
        """Return the state of the sensor."""
+       if self.entity_description.key in STATUS_CODES:
+           # Undocumented codes give unknown rather than an invalid option.
+           code = self.coordinator.data.get(self.entity_description.key)
+           return STATUS_CODES[self.entity_description.key].get(str(code))
        if self.entity_description.key == "total_solar_power":
            # Calculate total solar production from all MPPT inputs
            data = self.coordinator.data
@@ -93,9 +103,83 @@ class SolaxCloudSensor(CoordinatorEntity[solaxcloudCoordinator], SensorEntity):
        return self.coordinator.data.get(self.entity_description.key)
 
 
+# SolaXCloud User API V1.2, 8.1 "Device Status Mapping".
+INVERTER_STATUS = {
+    "100": "waiting",
+    "101": "self_test",
+    "102": "normal",
+    "103": "recoverable_fault",
+    "104": "permanent_fault",
+    "105": "firmware_upgrade",
+    "106": "eps_detection",
+    "107": "off_grid",
+    "108": "self_test_italy",
+    "109": "sleep",
+    "110": "standby",
+    "111": "pv_wake_up_battery",
+    "112": "generator_detection",
+    "113": "generator",
+    "114": "fast_shutdown_standby",
+    "130": "vpp",
+    "131": "tou_self_use",
+    "132": "tou_charging",
+    "133": "tou_discharging",
+    "134": "tou_battery_off",
+    "135": "tou_peak_shaving",
+    "136": "generator_normal_operation",
+    "137": "battery_expansion",
+    "138": "on_grid_battery_heating",
+    "139": "eps_battery_heating",
+    "141": "normal_r1",
+    "142": "normal_r2",
+    "143": "normal_r3",
+    "144": "normal_r4",
+    "145": "normal_r5",
+    "146": "normal_r6",
+    "147": "normal_r7",
+    "148": "normal_ss",
+    "150": "self_use",
+    "151": "force_time_use",
+    "152": "back_up",
+    "153": "feedin_priority",
+    "154": "demand",
+    "155": "constant_power",
+    "160": "openadr",
+}
+# SolaXCloud User API V1.2, 7.1, batStatus.
+BATTERY_STATUS = {"0": "normal", "1": "fault", "2": "disconnected"}
+STATUS_CODES = {"inverterStatus": INVERTER_STATUS, "batStatus": BATTERY_STATUS}
+
+
+def _power(key: str, name: str, translation_key: str, **kwargs) -> SensorEntityDescription:
+    return SensorEntityDescription(
+        key=key,
+        name=name,
+        translation_key=translation_key,
+        device_class=SensorDeviceClass.POWER,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+        **kwargs,
+    )
+
+
+def _energy(key: str, name: str, translation_key: str) -> SensorEntityDescription:
+    return SensorEntityDescription(
+        key=key,
+        name=name,
+        translation_key=translation_key,
+        device_class=SensorDeviceClass.ENERGY,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+    )
+
+
+# One sensor per field of the realtime response (SolaXCloud User API V1.2,
+# 7.1), except inverterType, plus the computed PV total. Names are kept from
+# earlier versions.
 SENSOR_TYPES = [
     SensorEntityDescription(
-        key="inverterSn",
+        key="inverterSN",
         name="Inverter serial",
         translation_key="inverter_serial",
     ),
@@ -105,305 +189,30 @@ SENSOR_TYPES = [
         translation_key="pocket_serial",
     ),
     SensorEntityDescription(
-        key="batPower",
-        name="Battery power",
-        translation_key="battery_power",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
+        key="inverterStatus",
+        name="Inverter status",
+        translation_key="inverter_status",
+        device_class=SensorDeviceClass.ENUM,
+        options=list(INVERTER_STATUS.values()),
     ),
-    SensorEntityDescription(
-        key="ratedPower",
-        name="Inverter size",
-        translation_key="inverter_size",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.KILO_WATT,
-        state_class=SensorStateClass.MEASUREMENT,
+    _power("acpower", "AC Power", "ac_power"),
+    _energy("yieldtoday", "Yield today", "yield_today"),
+    _energy("yieldtotal", "Yield total", "yield_total"),
+    _power("feedinpower", "Feedin Power", "feedin_power"),
+    _energy("feedinenergy", "Feedin energy", "feedin_energy"),
+    _energy("consumeenergy", "Consume energy", "consume_energy"),
+    _power(
+        "feedinpowerM2",
+        "Meter 2 power",
+        "meter2_power",
+        entity_registry_enabled_default=False,
     ),
-    SensorEntityDescription(
-        key="idc1",
-        name="MPPT1 current",
-        translation_key="mppt1_current",
-        device_class=SensorDeviceClass.CURRENT,
-        native_unit_of_measurement="A",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="idc2",
-        name="MPPT2 current",
-        translation_key="mppt2_current",
-        device_class=SensorDeviceClass.CURRENT,
-        native_unit_of_measurement="A",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="vdc1",
-        name="MPPT1 voltage",
-        translation_key="mppt1_voltage",
-        device_class=SensorDeviceClass.VOLTAGE,
-        native_unit_of_measurement="V",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="vdc2",
-        name="MPPT2 voltage",
-        translation_key="mppt2_voltage",
-        device_class=SensorDeviceClass.VOLTAGE,
-        native_unit_of_measurement="V",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="iac1",
-        name="AC phase 1 current",
-        translation_key="ac_phase1_current",
-        device_class=SensorDeviceClass.CURRENT,
-        native_unit_of_measurement="A",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="vac1",
-        name="AC phase 1 voltage",
-        translation_key="ac_phase1_voltage",
-        device_class=SensorDeviceClass.VOLTAGE,
-        native_unit_of_measurement="V",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="acpower",
-        name="AC Power",
-        translation_key="ac_power",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT
-    ),
-    SensorEntityDescription(
-        key="temperature",
-        name="Inverter Temperature",
-        translation_key="inverter_temperature",
-        device_class=SensorDeviceClass.TEMPERATURE,
-        native_unit_of_measurement="°C",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="yieldtoday",
-        name="Yield today",
-        translation_key="yield_today",
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement="kWh",
-        state_class=SensorStateClass.TOTAL_INCREASING,
-    ),
-    SensorEntityDescription(
-        key="yieldtotal",
-        name="Yield total",
-        translation_key="yield_total",
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement="kWh",
-        state_class=SensorStateClass.TOTAL_INCREASING,
-    ),
-    SensorEntityDescription(
-        key="feedinpower",
-        name="Feedin Power",
-        translation_key="feedin_power",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="powerdc1",
-        name="MPPT1 power",
-        translation_key="mppt1_power",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="powerdc2",
-        name="MPPT2 power",
-        translation_key="mppt2_power",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="total_solar_power",
-        name="Total Solar Power",
-        translation_key="total_solar_power",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="pac1",
-        name="AC phase 1 power",
-        translation_key="ac_phase1_power",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="pac2",
-        name="AC phase 2 power",
-        translation_key="ac_phase2_power",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="pac3",
-        name="AC phase 3 power",
-        translation_key="ac_phase3_power",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="iac2",
-        name="AC phase 2 current",
-        translation_key="ac_phase2_current",
-        device_class=SensorDeviceClass.CURRENT,
-        native_unit_of_measurement="A",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="iac3",
-        name="AC phase 3 current",
-        translation_key="ac_phase3_current",
-        device_class=SensorDeviceClass.CURRENT,
-        native_unit_of_measurement="A",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="vac2",
-        name="AC phase 2 voltage",
-        translation_key="ac_phase2_voltage",
-        device_class=SensorDeviceClass.VOLTAGE,
-        native_unit_of_measurement="V",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="vac3",
-        name="AC phase 3 voltage",
-        translation_key="ac_phase3_voltage",
-        device_class=SensorDeviceClass.VOLTAGE,
-        native_unit_of_measurement="V",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="fac1",
-        name="AC phase 1 frequency",
-        translation_key="ac_phase1_frequency",
-        device_class=SensorDeviceClass.FREQUENCY,
-        native_unit_of_measurement="Hz",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="fac2",
-        name="AC phase 2 frequency",
-        translation_key="ac_phase2_frequency",
-        device_class=SensorDeviceClass.FREQUENCY,
-        native_unit_of_measurement="Hz",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="fac3",
-        name="AC phase 3 frequency",
-        translation_key="ac_phase3_frequency",
-        device_class=SensorDeviceClass.FREQUENCY,
-        native_unit_of_measurement="Hz",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="feedinenergy",
-        name="Feedin energy",
-        translation_key="feedin_energy",
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-    ),
-    SensorEntityDescription(
-        key="consumeenergy",
-        name="Consume energy",
-        translation_key="consume_energy",
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-    ),
-    SensorEntityDescription(
-        key="uploadTime",
-        name="Last cloud upload",
-        translation_key="upload_time",
-        # device_class=SensorDeviceClass.TIMESTAMP,
-    ),
-    SensorEntityDescription(
-        key="utcDateTime",
-        name="UTC Date Time",
-        translation_key="utc_date_time",
-        device_class=SensorDeviceClass.TIMESTAMP,
-    ),
-    SensorEntityDescription(
-        key="batVoltage",
-        name="Battery voltage",
-        translation_key="battery_voltage",
-        device_class=SensorDeviceClass.VOLTAGE,
-        native_unit_of_measurement="V",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="batCurrent",
-        name="Battery current",
-        translation_key="battery current",
-        device_class=SensorDeviceClass.CURRENT,
-        native_unit_of_measurement="A",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="temperBoard",
-        name="Battery temperature 1",
-        translation_key="battery_temperature_1",
-        device_class=SensorDeviceClass.TEMPERATURE,
-        native_unit_of_measurement="°C",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="surplusEnergy",
-        name="Surplus energy",
-        translation_key="surplus_energy",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="chargeEnergy",
-        name="Charge energy",
-        translation_key="charge_energy",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="dischargeEnergy",
-        name="Discharge energy",
-        translation_key="discharge_energy",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="acenergyin",
-        name="Grid energy in",
-        translation_key="grid_energy",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="pvenergy",
-        name="Feedin energy",
-        translation_key="pv_energy",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
+    _power("powerdc1", "MPPT1 power", "mppt1_power"),
+    _power("powerdc2", "MPPT2 power", "mppt2_power"),
+    _power("powerdc3", "MPPT3 power", "mppt3_power", entity_registry_enabled_default=False),
+    _power("powerdc4", "MPPT4 power", "mppt4_power", entity_registry_enabled_default=False),
+    _power("total_solar_power", "Total Solar Power", "total_solar_power"),
+    _power("batPower", "Battery power", "battery_power"),
     SensorEntityDescription(
         key="soc",
         name="State of charge",
@@ -413,96 +222,24 @@ SENSOR_TYPES = [
         state_class=SensorStateClass.MEASUREMENT,
     ),
     SensorEntityDescription(
-        key="battemper",
-        name="Battery temperature 2",
-        translation_key="battery_temperature_2",
-        device_class=SensorDeviceClass.TEMPERATURE,
-        native_unit_of_measurement="°C",
-        state_class=SensorStateClass.MEASUREMENT,
+        key="batStatus",
+        name="Battery status",
+        translation_key="battery_status",
+        device_class=SensorDeviceClass.ENUM,
+        options=list(BATTERY_STATUS.values()),
+    ),
+    _power("peps1", "EPS phase 1 power", "eps_phase1_power"),
+    _power("peps2", "EPS phase 2 power", "eps_phase2_power"),
+    _power("peps3", "EPS phase 3 power", "eps_phase3_power"),
+    SensorEntityDescription(
+        key="uploadTime",
+        name="Last cloud upload",
+        translation_key="upload_time",
     ),
     SensorEntityDescription(
-        key="veps1",
-        name="EPS phase 1 voltage",
-        translation_key="eps_phase1_voltage",
-        device_class=SensorDeviceClass.VOLTAGE,
-        native_unit_of_measurement="V",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="veps2",
-        name="EPS phase 2 voltage",
-        translation_key="eps_phase2_voltage",
-        device_class=SensorDeviceClass.VOLTAGE,
-        native_unit_of_measurement="V",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="veps3",
-        name="EPS phase 3 voltage",
-        translation_key="eps_phase3_voltage",
-        device_class=SensorDeviceClass.VOLTAGE,
-        native_unit_of_measurement="V",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="ieps1",
-        name="EPS phase 1 current",
-        translation_key="eps_phase1_current",
-        device_class=SensorDeviceClass.CURRENT,
-        native_unit_of_measurement="A",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="ieps2",
-        name="EPS phase 2 current",
-        translation_key="eps_phase2_current",
-        device_class=SensorDeviceClass.CURRENT,
-        native_unit_of_measurement="A",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="ieps3",
-        name="EPS phase 3 current",
-        translation_key="eps_phase3_current",
-        device_class=SensorDeviceClass.CURRENT,
-        native_unit_of_measurement="A",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="peps1",
-        name="EPS phase 1 power",
-        translation_key="eps_phase1_power",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="peps2",
-        name="EPS phase 2 power",
-        translation_key="eps_phase2_power",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="peps3",
-        name="EPS phase 3 power",
-        translation_key="eps_phase3_power",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="epsfreq",
-        name="EPS frequency",
-        translation_key="eps_frequency",
-        device_class=SensorDeviceClass.FREQUENCY,
-        native_unit_of_measurement="Hz",
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="batcycle",
-        name="Battery cycle count",
-        translation_key="batcycle",
+        key="utcDateTime",
+        name="UTC Date Time",
+        translation_key="utc_date_time",
+        device_class=SensorDeviceClass.TIMESTAMP,
     ),
 ]

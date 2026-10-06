@@ -22,5 +22,60 @@
       "already_configured": "This dongle is already configured.",
       "already_in_progress": "This dongle is already being set up."
     }
+  },
+  "entity": {
+    "sensor": {
+      "inverter_status": {
+        "state": {
+          "waiting": "Waiting for operation",
+          "self_test": "Self-test",
+          "normal": "Normal",
+          "recoverable_fault": "Recoverable fault",
+          "permanent_fault": "Permanent fault",
+          "firmware_upgrade": "Firmware upgrade",
+          "eps_detection": "EPS detection",
+          "off_grid": "Off-grid",
+          "self_test_italy": "Self-test mode (Italian safety regulations)",
+          "sleep": "Sleep mode",
+          "standby": "Standby mode",
+          "pv_wake_up_battery": "Photovoltaic wake-up battery mode",
+          "generator_detection": "Generator detection mode",
+          "generator": "Generator mode",
+          "fast_shutdown_standby": "Fast shutdown standby mode",
+          "vpp": "VPP mode",
+          "tou_self_use": "TOU self use",
+          "tou_charging": "TOU charging",
+          "tou_discharging": "TOU discharging",
+          "tou_battery_off": "TOU battery off",
+          "tou_peak_shaving": "TOU peak shaving",
+          "generator_normal_operation": "Normal generator operation mode",
+          "battery_expansion": "Battery expansion mode",
+          "on_grid_battery_heating": "On-grid battery heating mode",
+          "eps_battery_heating": "EPS battery heating mode",
+          "normal_r1": "Normal mode (R-1)",
+          "normal_r2": "Normal mode (R-2)",
+          "normal_r3": "Normal mode (R-3)",
+          "normal_r4": "Normal mode (R-4)",
+          "normal_r5": "Normal mode (R-5)",
+          "normal_r6": "Normal mode (R-6)",
+          "normal_r7": "Normal mode (R-7)",
+          "normal_ss": "Normal mode (SS)",
+          "self_use": "Self use",
+          "force_time_use": "Force time use",
+          "back_up": "Back up mode",
+          "feedin_priority": "Feed-in priority",
+          "demand": "Demand mode",
+          "constant_power": "Constant power mode",
+          "openadr": "OpenADR mode"
+        }
+      },
+      "battery_status": {
+        "state": {
+          "normal": "Normal",
+          "fault": "Fault",
+          "disconnected": "Disconnected"
+        }
+      }
+    }
   }
 }
