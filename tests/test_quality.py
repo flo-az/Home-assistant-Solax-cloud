@@ -175,22 +175,26 @@ def _flatten(tree: dict[str, Any], prefix: str = "") -> dict[str, str]:
     return flat
 
 
-def test_german_translation_matches_english() -> None:
-    """Every English text has a German one with the same placeholders."""
+@pytest.mark.parametrize("language", ["de", "es"])
+def test_translation_matches_english(language: str) -> None:
+    """Every English text has a translation with the same placeholders."""
     english = _flatten(
         json.loads((INTEGRATION_DIR / "translations" / "en.json").read_text())
     )
-    german = _flatten(
-        json.loads((INTEGRATION_DIR / "translations" / "de.json").read_text())
+    translated = _flatten(
+        json.loads((INTEGRATION_DIR / "translations" / f"{language}.json").read_text())
     )
 
-    assert german.keys() == english.keys()
+    assert translated.keys() == english.keys()
     placeholders = {
         key: (set(re.findall(r"{\w+}", english[key])), set(re.findall(r"{\w+}", text)))
-        for key, text in german.items()
+        for key, text in translated.items()
     }
     assert {k: v for k, v in placeholders.items() if v[0] != v[1]} == {}
-    assert [k for k, v in german.items() if not v.strip()] == []
+    assert [k for k, v in translated.items() if not v.strip()] == []
+    # Not just a copy of the English file.
+    same = [k for k in english if translated[k] == english[k]]
+    assert len(same) < len(english) / 4, same
 
 
 def _http_error_carrying_the_token(status: int) -> aiohttp.ClientResponseError:

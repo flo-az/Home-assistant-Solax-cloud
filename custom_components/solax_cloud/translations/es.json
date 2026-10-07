@@ -1,0 +1,206 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Conectar con Solax Cloud",
+        "description": "Copia la dirección de la API y el token ID de la página API de Solax Cloud (el botón «API» en la parte superior de la página).",
+        "data": {
+          "api_address": "Dirección de la API",
+          "token_id": "Token ID",
+          "serial_number": "Número de serie del dongle"
+        },
+        "data_description": {
+          "api_address": "Aparece en la página API junto al token ID.",
+          "token_id": "Aparece en la página API de Solax Cloud.",
+          "serial_number": "Número de registro del dongle Pocket WiFi/LAN, no el número de serie del inversor."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Se necesita el token de Solax Cloud",
+        "description": "Solax Cloud ha rechazado el token ID o el número de serie {serial} del dongle. Los tokens anteriores a la API v2 pueden haber dejado de funcionar: copia la dirección de la API y el token ID actuales de la página API de Solax Cloud. Si se ha sustituido el dongle, elimina esta integración y vuelve a añadirla con el nuevo número de serie.",
+        "data": {
+          "api_address": "Dirección de la API",
+          "token_id": "Token ID"
+        }
+      },
+      "reconfigure": {
+        "title": "Cambiar la conexión con Solax Cloud",
+        "description": "Actualiza la dirección de la API o el token ID del dongle {serial}, tal como aparecen en la página API de Solax Cloud.",
+        "data": {
+          "api_address": "Dirección de la API",
+          "token_id": "Token ID"
+        },
+        "data_description": {
+          "api_address": "Aparece en la página API junto al token ID.",
+          "token_id": "Déjalo vacío para conservar el token actual."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "No se pudo conectar con Solax Cloud. Comprueba la red e inténtalo de nuevo.",
+      "invalid_token": "Solax Cloud ha rechazado este token ID. Copia el actual de la página API.",
+      "serial_not_in_account": "Este número de serie del dongle no pertenece a la cuenta de este token ID. Usa el número de registro del dongle, no el número de serie del inversor.",
+      "api_error": "Solax Cloud no pudo procesar la solicitud o aún no tiene datos de este dongle. Inténtalo más tarde.",
+      "insecure_address": "La dirección de la API debe empezar por https://; con http el token se enviaría sin cifrar.",
+      "token_required": "Vuelve a introducir el token ID al cambiar a otra dirección de la API."
+    },
+    "abort": {
+      "already_configured": "Este dongle ya está configurado.",
+      "already_in_progress": "Este dongle ya se está configurando.",
+      "reauth_successful": "El nuevo token funciona; Solax Cloud vuelve a estar conectado.",
+      "reconfigure_successful": "La nueva configuración funciona; Solax Cloud está conectado."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "inverter_serial": {
+        "name": "Número de serie del inversor"
+      },
+      "pocket_serial": {
+        "name": "Número de serie del dongle"
+      },
+      "inverter_status": {
+        "name": "Estado del inversor",
+        "state": {
+          "waiting": "Esperando funcionamiento",
+          "self_test": "Autoprueba",
+          "normal": "Normal",
+          "recoverable_fault": "Fallo recuperable",
+          "permanent_fault": "Fallo permanente",
+          "firmware_upgrade": "Actualización de firmware",
+          "eps_detection": "Detección EPS",
+          "off_grid": "Aislado de la red",
+          "self_test_italy": "Autoprueba (normativa de seguridad italiana)",
+          "sleep": "Modo reposo",
+          "standby": "Modo en espera",
+          "pv_wake_up_battery": "FV activa la batería",
+          "generator_detection": "Detección de generador",
+          "generator": "Modo generador",
+          "fast_shutdown_standby": "Apagado rápido (en espera)",
+          "vpp": "Modo VPP",
+          "tou_self_use": "TOU autoconsumo",
+          "tou_charging": "TOU carga",
+          "tou_discharging": "TOU descarga",
+          "tou_battery_off": "TOU batería apagada",
+          "tou_peak_shaving": "TOU recorte de picos",
+          "generator_normal_operation": "Funcionamiento normal con generador",
+          "battery_expansion": "Ampliación de batería",
+          "on_grid_battery_heating": "Calentamiento de batería (conectado a red)",
+          "eps_battery_heating": "Calentamiento de batería (EPS)",
+          "normal_r1": "Modo normal (R-1)",
+          "normal_r2": "Modo normal (R-2)",
+          "normal_r3": "Modo normal (R-3)",
+          "normal_r4": "Modo normal (R-4)",
+          "normal_r5": "Modo normal (R-5)",
+          "normal_r6": "Modo normal (R-6)",
+          "normal_r7": "Modo normal (R-7)",
+          "normal_ss": "Modo normal (SS)",
+          "self_use": "Autoconsumo",
+          "force_time_use": "Uso por horario forzado",
+          "back_up": "Modo respaldo",
+          "feedin_priority": "Prioridad de inyección",
+          "demand": "Modo demanda",
+          "constant_power": "Potencia constante",
+          "openadr": "Modo OpenADR"
+        }
+      },
+      "ac_power": {
+        "name": "Potencia CA"
+      },
+      "yield_today": {
+        "name": "Producción de hoy"
+      },
+      "yield_total": {
+        "name": "Producción total"
+      },
+      "feedin_power": {
+        "name": "Potencia inyectada"
+      },
+      "feedin_energy": {
+        "name": "Energía inyectada"
+      },
+      "consume_energy": {
+        "name": "Energía consumida de la red"
+      },
+      "meter2_power": {
+        "name": "Potencia del contador 2"
+      },
+      "mppt1_power": {
+        "name": "Potencia MPPT1"
+      },
+      "mppt2_power": {
+        "name": "Potencia MPPT2"
+      },
+      "mppt3_power": {
+        "name": "Potencia MPPT3"
+      },
+      "mppt4_power": {
+        "name": "Potencia MPPT4"
+      },
+      "total_solar_power": {
+        "name": "Potencia solar total"
+      },
+      "battery_power": {
+        "name": "Potencia de la batería"
+      },
+      "soc": {
+        "name": "Estado de carga"
+      },
+      "battery_status": {
+        "name": "Estado de la batería",
+        "state": {
+          "normal": "Normal",
+          "fault": "Fallo",
+          "disconnected": "Desconectada"
+        }
+      },
+      "eps_phase1_power": {
+        "name": "Potencia EPS fase 1"
+      },
+      "eps_phase2_power": {
+        "name": "Potencia EPS fase 2"
+      },
+      "eps_phase3_power": {
+        "name": "Potencia EPS fase 3"
+      },
+      "upload_time": {
+        "name": "Última subida a la nube"
+      },
+      "utc_date_time": {
+        "name": "Hora de subida"
+      },
+      "battery_charge_energy": {
+        "name": "Energía cargada en la batería"
+      },
+      "battery_discharge_energy": {
+        "name": "Energía descargada de la batería"
+      },
+      "solar_energy": {
+        "name": "Energía solar"
+      }
+    }
+  },
+  "exceptions": {
+    "cannot_connect": {
+      "message": "No se pudo conectar con Solax Cloud: {error}"
+    },
+    "api_error": {
+      "message": "Solax Cloud no pudo procesar la solicitud: {error}"
+    },
+    "invalid_token": {
+      "message": "Solax Cloud ha rechazado el token ID: {error}"
+    },
+    "serial_not_in_account": {
+      "message": "El dongle {serial} no pertenece a la cuenta de este token ID; si se ha sustituido el dongle, vuelve a añadir la integración: {error}"
+    },
+    "insecure_address": {
+      "message": "La dirección de la API no es https; el token se enviaría sin cifrar. Vuelve a configurar la integración con una dirección https."
+    }
+  },
+  "issues": {
+    "dongle_offline": {
+      "title": "El dongle de Solax no está enviando datos",
+      "description": "Solax Cloud no tiene datos nuevos del dongle desde {last_upload}. Sus valores en directo se muestran como no disponibles hasta que vuelva a enviar datos. Comprueba que el dongle tenga alimentación y red; este aviso desaparece solo en cuanto lleguen datos."
+    }
+  }
+}

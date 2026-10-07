@@ -66,7 +66,7 @@ token from before the v2 API), Home Assistant asks for a new one under
 *Settings → Devices & services*. If you replace the dongle, remove the
 integration and add it again with the new dongle's serial number.
 
-The integration is translated into English and German.
+The integration is translated into English, German and Spanish.
 
 ## Sensors
 

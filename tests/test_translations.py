@@ -199,7 +199,7 @@ async def test_reconfigure_and_setup_refusals_have_text(
     )
     error = result["errors"]["base"]
 
-    for language in ("en", "de"):
+    for language in ("en", "de", "es"):
         config = await async_get_translations(hass, language, "config", {DOMAIN})
         exceptions = await async_get_translations(
             hass, language, "exceptions", {DOMAIN}
