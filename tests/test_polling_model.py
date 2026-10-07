@@ -368,6 +368,7 @@ def _deadline_tracker(gaps_seconds: list[int]) -> UploadTracker:
         newest=NOW,
         seen_at=NOW,
         gaps=tuple(timedelta(seconds=g) for g in gaps_seconds),
+        first_gap_at=NOW,
         pending_gap=timedelta(seconds=gaps_seconds[-1]),
         pending_count=1,
         offsets=(timedelta(0),),
@@ -402,6 +403,51 @@ def test_learning_continues_before_the_deadline() -> None:
     after, _ = see(tracker, NOW, NOW + LEARNING_LIMIT - SEC)
 
     assert not after.confirmed
+
+
+def _learned_at(cadence: timedelta) -> tuple[UploadTracker, datetime]:
+    tracker = _learn(cadence)
+    assert tracker.last_poll is not None
+    return tracker, tracker.last_poll
+
+
+@settings(max_examples=200, deadline=None)
+@given(
+    minutes=st.integers(1, 15),
+    ahead=st.integers(1, 23).map(lambda h: timedelta(hours=h)),
+)
+def test_regression_bogus_stamp_is_overcome_under_the_real_scheduler(
+    minutes: int, ahead: timedelta
+) -> None:
+    """Regression: after one stamp hours ahead, the real scheduler sees each
+    later (older-looking) upload several times; that restarted the count of
+    advancing older stamps, so slow dongles stayed stuck for up to a day."""
+    cadence = timedelta(minutes=minutes)
+    tracker, start = _learned_at(cadence)
+    tracker, _ = see(tracker, start + ahead, start)
+    now, reset_at = start, None
+    while now < start + timedelta(hours=24) and reset_at is None:
+        now += next_poll(tracker, now)
+        tracker, seen = see(tracker, NOW + cadence * ((now - NOW) // cadence), now)
+        if seen is Seen.RESET:
+            reset_at = now
+
+    assert reset_at is not None
+    assert reset_at - start <= 3 * cadence + OFFLINE_POLL + MIN
+
+
+def test_regression_learning_deadline_counts_from_the_first_gap() -> None:
+    """Regression: after a quiet night the deadline had long passed, so the
+    first measured gap (here double, from a missed upload) was confirmed."""
+    morning = NOW + timedelta(hours=10)
+    tracker, _ = see(UploadTracker.start(NOW), morning - 10 * MIN, morning)
+    tracker, _ = see(tracker, morning - 10 * MIN, morning + 30 * SEC)
+    tracker, _ = see(tracker, morning, morning + 60 * SEC)
+
+    assert not tracker.confirmed
+    tracker = _closely_watched_gaps(tracker, [5, 5])
+    assert tracker.confirmed
+    assert tracker.cadence == 5 * MIN
 
 
 def test_next_poll_while_learning_and_without_any_upload_time() -> None:
@@ -495,6 +541,11 @@ def test_property_tracker_follows_any_dongle(dongle: Dongle) -> None:
         )
         if seen is Seen.NEW and n is not None:
             first_seen.setdefault(n, true_now)
+        # Why the interval cap never binds: the expected next upload is at
+        # most one cadence after the newest was seen, which is in the past.
+        if tracker.offsets and tracker.newest and tracker.seen_at:
+            assert tracker.newest + min(tracker.offsets) <= tracker.seen_at
+            assert tracker.seen_at <= true_now
         uploading = true_now <= last_upload_time
         if uploading and n is not None:
             assert not is_stale(tracker, true_now), "stale while uploading"

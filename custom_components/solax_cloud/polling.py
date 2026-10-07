@@ -123,6 +123,7 @@ class UploadTracker:
     pending_gap: timedelta | None = None
     pending_count: int = 0
     gaps: tuple[timedelta, ...] = ()  # recent closely watched gaps
+    first_gap_at: datetime | None = None  # when learning had a first gap
     # Sighting time minus stamp: the clock difference plus the cloud's delay,
     # plus however late we looked. Its minimum estimates the first two.
     offsets: tuple[timedelta, ...] = ()
@@ -181,10 +182,14 @@ def _older(
     tracker: UploadTracker, stamp: datetime, now: datetime
 ) -> tuple[UploadTracker, Seen]:
     """An upload older than the newest: a stale replica, or a clock fix."""
-    if tracker.behind and stamp > tracker.behind[-1]:
-        behind = (*tracker.behind, stamp)
-    else:
-        behind = (stamp,)
+    match tracker.behind:
+        case (*_, last) if stamp == last:
+            # Seen again (we poll more often than it uploads): no new evidence.
+            return tracker, Seen.OLDER
+        case (*_, last) if stamp > last:
+            behind = (*tracker.behind, stamp)
+        case _:
+            behind = (stamp,)
     if len(behind) < RESET_AFTER:
         return replace(tracker, behind=behind), Seen.OLDER
     return (
@@ -256,7 +261,11 @@ def _learn(tracker: UploadTracker, gap: timedelta) -> UploadTracker:
     two, or three when the gap is a multiple of the current cadence (which
     is what missed uploads look like).
     """
-    tracker = replace(tracker, gaps=(*tracker.gaps, gap)[-GAPS_KEPT:])
+    tracker = replace(
+        tracker,
+        gaps=(*tracker.gaps, gap)[-GAPS_KEPT:],
+        first_gap_at=tracker.first_gap_at or tracker.last_poll,
+    )
     if abs(gap - tracker.cadence) <= tolerance(tracker.cadence):
         return replace(tracker, confirmed=True, pending_gap=None, pending_count=0)
     if tracker.pending_gap is not None and abs(gap - tracker.pending_gap) <= tolerance(
@@ -287,7 +296,13 @@ def _end_learning_if_due(tracker: UploadTracker, now: datetime) -> UploadTracker
     Without any measured gap it keeps learning: then there are no uploads to
     learn from, data goes stale and polling backs off anyway.
     """
-    if tracker.confirmed or not tracker.gaps or now - tracker.started < LEARNING_LIMIT:
+    # Counted from the first measured gap, not from start: after a quiet
+    # night the first gap alone must not decide.
+    if (
+        tracker.confirmed
+        or tracker.first_gap_at is None
+        or now - tracker.first_gap_at < LEARNING_LIMIT
+    ):
         return tracker
     # Missed uploads only make gaps longer: use the gaps near the shortest.
     shortest = min(tracker.gaps)

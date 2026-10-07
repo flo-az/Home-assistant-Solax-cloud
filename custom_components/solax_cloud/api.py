@@ -86,7 +86,15 @@ class SolaxCloudClient:
                 json={"wifiSn": self._serial},
                 headers={"tokenId": self._token},
                 timeout=REQUEST_TIMEOUT,
+                # aiohttp keeps custom headers (our token) across redirects,
+                # even to other hosts or to plain http: never follow them.
+                allow_redirects=False,
             ) as response:
+                if 300 <= response.status < 400:
+                    raise SolaxCloudConnectionError(
+                        f"unexpected redirect (HTTP {response.status}); "
+                        "check the API address"
+                    )
                 response.raise_for_status()
                 # HA's parser, as in tests; it rejects NaN/Infinity tokens.
                 body = await response.json(content_type=None, loads=json_loads)
